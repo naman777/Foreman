@@ -191,7 +191,7 @@ Coordinator Restart Recovery:
 
 | Choice | Why |
 |---|---|
-| **React + Vite** | Fast, familiar, small bundle |
+| **NextJs** | Fast, familiar, small bundle |
 | **TailwindCSS** | Rapid UI without fighting CSS |
 | **TanStack Query** | Auto-polling, cache invalidation |
 | **Recharts** | Simple charts for metrics |
@@ -227,7 +227,7 @@ Coordinator Restart Recovery:
   /models           ← DB structs
   /store            ← DB queries
 /migrations         ← .sql files
-/dashboard          ← React app
+/dashboard          ← NextJs app
 docker-compose.yml
 Makefile
 ```
@@ -439,7 +439,7 @@ func (s *Scheduler) score(w Worker, j Job) float64 {
 
 ### Phase 8 — Dashboard (Days 11–13)
 
-**Goal:** Working React dashboard with real-time updates.
+**Goal:** Working NextJS dashboard with real-time updates.
 
 **Pages to build in order:**
 

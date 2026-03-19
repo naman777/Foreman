@@ -1,3 +1,11 @@
+# Go binaries
+bin/
+*.exe
+*.test
+
+# Go build cache
+/vendor/
+
 # Logs
 logs
 *.log
