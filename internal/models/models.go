@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,7 +36,7 @@ type Worker struct {
 	LastHeartbeat *time.Time   `db:"last_heartbeat" json:"last_heartbeat"`
 	CPUCores      int          `db:"cpu_cores"      json:"cpu_cores"`
 	MemoryMB      int          `db:"memory_mb"      json:"memory_mb"`
-	Labels        []byte       `db:"labels"         json:"labels"`
+	Labels        json.RawMessage `db:"labels"         json:"labels"`
 	CurrentLoad   int          `db:"current_load"   json:"current_load"`
 	RegisteredAt  time.Time    `db:"registered_at"  json:"registered_at"`
 }
@@ -67,5 +68,5 @@ type JobEvent struct {
 	JobID     uuid.UUID `db:"job_id"     json:"job_id"`
 	EventType string    `db:"event_type" json:"event_type"`
 	Timestamp time.Time `db:"timestamp"  json:"timestamp"`
-	Metadata  []byte    `db:"metadata"   json:"metadata"`
+	Metadata  json.RawMessage `db:"metadata"   json:"metadata"`
 }
