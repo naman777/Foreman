@@ -102,8 +102,10 @@ func (s *Store) UpdateJobStatus(ctx context.Context, p UpdateJobStatusParams) (m
 			WHERE id = $1 RETURNING ` + jobCols
 		args = []any{p.JobID, p.Status, p.WorkerID}
 	case models.JobRunning:
+		// Use the job's own timeout so the monitor doesn't recover a legitimately running job.
 		query = `UPDATE jobs
-			SET status = $2, started_at = NOW(), lock_expires_at = NOW() + INTERVAL '30 seconds'
+			SET status = $2, started_at = NOW(),
+			    lock_expires_at = NOW() + (timeout_seconds * INTERVAL '1 second')
 			WHERE id = $1 RETURNING ` + jobCols
 		args = []any{p.JobID, p.Status}
 	case models.JobCompleted, models.JobFailed, models.JobTimedOut, models.JobCancelled:
