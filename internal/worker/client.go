@@ -85,13 +85,18 @@ type ReportStatusParams struct {
 	JobID    string
 	Status   models.JobStatus
 	WorkerID string
+	LogsPath string
 }
 
 func (c *Client) ReportStatus(ctx context.Context, p ReportStatusParams) error {
-	body, _ := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"status":    p.Status,
 		"worker_id": p.WorkerID,
-	})
+	}
+	if p.LogsPath != "" {
+		payload["logs_path"] = p.LogsPath
+	}
+	body, _ := json.Marshal(payload)
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/jobs/%s/status", p.JobID), body, nil)
 }
 

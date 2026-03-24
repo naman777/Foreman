@@ -149,6 +149,7 @@ func (h *Handler) nextJob(w http.ResponseWriter, r *http.Request) {
 type updateJobStatusRequest struct {
 	Status   models.JobStatus `json:"status"`
 	WorkerID *string          `json:"worker_id"`
+	LogsPath *string          `json:"logs_path"`
 }
 
 func (h *Handler) updateJobStatus(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +175,7 @@ func (h *Handler) updateJobStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p := store.UpdateJobStatusParams{JobID: jobID, Status: req.Status}
+	p := store.UpdateJobStatusParams{JobID: jobID, Status: req.Status, LogsPath: req.LogsPath}
 	if req.WorkerID != nil {
 		wid, err := parseUUID(*req.WorkerID)
 		if err != nil {

@@ -32,7 +32,12 @@ func main() {
 	memoryMB := envInt("WORKER_MEMORY_MB", 1024)
 
 	client := worker.NewClient(coordinatorURL, secret)
-	executor := worker.NewExecutor()
+	executor, err := worker.NewExecutor()
+	if err != nil {
+		slog.Error("failed to connect to Docker daemon", "error", err)
+		os.Exit(1)
+	}
+	defer executor.Close()
 
 	hostname, _ := os.Hostname()
 
@@ -150,6 +155,7 @@ func runJob(
 		JobID:    job.ID.String(),
 		Status:   finalStatus,
 		WorkerID: workerID,
+		LogsPath: result.LogsPath,
 	}); err != nil {
 		slog.Error("failed to report job result", "job_id", job.ID, "status", finalStatus, "error", err)
 	}

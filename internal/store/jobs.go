@@ -89,6 +89,7 @@ type UpdateJobStatusParams struct {
 	JobID    uuid.UUID
 	Status   models.JobStatus
 	WorkerID *uuid.UUID
+	LogsPath *string
 }
 
 func (s *Store) UpdateJobStatus(ctx context.Context, p UpdateJobStatusParams) (models.Job, error) {
@@ -109,10 +110,12 @@ func (s *Store) UpdateJobStatus(ctx context.Context, p UpdateJobStatusParams) (m
 			WHERE id = $1 RETURNING ` + jobCols
 		args = []any{p.JobID, p.Status}
 	case models.JobCompleted, models.JobFailed, models.JobTimedOut, models.JobCancelled:
+		// COALESCE keeps existing logs_path if the caller doesn't supply one.
 		query = `UPDATE jobs
-			SET status = $2, completed_at = NOW(), lock_expires_at = NULL
+			SET status = $2, completed_at = NOW(), lock_expires_at = NULL,
+			    logs_path = COALESCE($3, logs_path)
 			WHERE id = $1 RETURNING ` + jobCols
-		args = []any{p.JobID, p.Status}
+		args = []any{p.JobID, p.Status, p.LogsPath}
 	default:
 		query = `UPDATE jobs SET status = $2 WHERE id = $1 RETURNING ` + jobCols
 		args = []any{p.JobID, p.Status}
