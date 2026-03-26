@@ -110,12 +110,9 @@ func (s *Store) UpdateJobStatus(ctx context.Context, p UpdateJobStatusParams) (m
 			WHERE id = $1 RETURNING ` + jobCols
 		args = []any{p.JobID, p.Status}
 	case models.JobCompleted, models.JobFailed, models.JobTimedOut, models.JobCancelled:
+		// Terminal states run in a transaction so we can also decrement worker load.
 		// COALESCE keeps existing logs_path if the caller doesn't supply one.
-		query = `UPDATE jobs
-			SET status = $2, completed_at = NOW(), lock_expires_at = NULL,
-			    logs_path = COALESCE($3, logs_path)
-			WHERE id = $1 RETURNING ` + jobCols
-		args = []any{p.JobID, p.Status, p.LogsPath}
+		return s.finaliseJob(ctx, p)
 	default:
 		query = `UPDATE jobs SET status = $2 WHERE id = $1 RETURNING ` + jobCols
 		args = []any{p.JobID, p.Status}
@@ -126,6 +123,43 @@ func (s *Store) UpdateJobStatus(ctx context.Context, p UpdateJobStatusParams) (m
 		return models.Job{}, err
 	}
 	return pgx.CollectOneRow(rows, pgx.RowToStructByName[models.Job])
+}
+
+// finaliseJob handles terminal status transitions in a transaction so that the
+// worker's current_load is decremented atomically with the job status update.
+func (s *Store) finaliseJob(ctx context.Context, p UpdateJobStatusParams) (models.Job, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return models.Job{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		UPDATE jobs
+		SET status = $2, completed_at = NOW(), lock_expires_at = NULL,
+		    logs_path = COALESCE($3, logs_path)
+		WHERE id = $1 RETURNING `+jobCols,
+		p.JobID, p.Status, p.LogsPath,
+	)
+	if err != nil {
+		return models.Job{}, err
+	}
+	job, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[models.Job])
+	if err != nil {
+		return models.Job{}, err
+	}
+
+	if job.WorkerID != nil {
+		_, _ = tx.Exec(ctx,
+			`UPDATE workers SET current_load = GREATEST(0, current_load - 1) WHERE id = $1`,
+			*job.WorkerID,
+		)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return models.Job{}, err
+	}
+	return job, nil
 }
 
 // GetNextJob atomically claims the next available queued job for a worker.

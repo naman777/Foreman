@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -66,7 +67,8 @@ func main() {
 	mon := monitor.New(s)
 	go mon.Run(ctx)
 
-	sched := scheduler.New(s, rdb)
+	maxParallel := envInt("MAX_PARALLEL_JOBS_PER_WORKER", 4)
+	sched := scheduler.New(s, rdb, maxParallel)
 	go sched.Run(ctx)
 
 	// HTTP server
@@ -106,6 +108,15 @@ func mustEnv(key string) string {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return fallback
 }
