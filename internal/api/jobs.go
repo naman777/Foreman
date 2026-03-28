@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -147,9 +148,10 @@ func (h *Handler) nextJob(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateJobStatusRequest struct {
-	Status   models.JobStatus `json:"status"`
-	WorkerID *string          `json:"worker_id"`
-	LogsPath *string          `json:"logs_path"`
+	Status       models.JobStatus `json:"status"`
+	WorkerID     *string          `json:"worker_id"`
+	LogsPath     *string          `json:"logs_path"`
+	ArtifactPath *string          `json:"artifact_path"`
 }
 
 func (h *Handler) updateJobStatus(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +177,12 @@ func (h *Handler) updateJobStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p := store.UpdateJobStatusParams{JobID: jobID, Status: req.Status, LogsPath: req.LogsPath}
+	p := store.UpdateJobStatusParams{
+		JobID:        jobID,
+		Status:       req.Status,
+		LogsPath:     req.LogsPath,
+		ArtifactPath: req.ArtifactPath,
+	}
 	if req.WorkerID != nil {
 		wid, err := parseUUID(*req.WorkerID)
 		if err != nil {
@@ -202,5 +209,40 @@ func (h *Handler) updateJobStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getJobArtifacts(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented, "artifact storage not yet implemented (Phase 7)")
+	jobID, err := parseUUID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job id")
+		return
+	}
+
+	job, err := h.store.GetJob(r.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get job")
+		return
+	}
+
+	if job.ArtifactPath == nil || *job.ArtifactPath == "" {
+		writeError(w, http.StatusNotFound, "no artifacts for this job")
+		return
+	}
+	if h.artifacts == nil {
+		writeError(w, http.StatusServiceUnavailable, "artifact storage not configured")
+		return
+	}
+
+	url, err := h.artifacts.GetPresignedURL(r.Context(), *job.ArtifactPath, time.Hour)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate download URL")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"object_key":   *job.ArtifactPath,
+		"download_url": url,
+		"expires_in":   "1h",
+	})
 }

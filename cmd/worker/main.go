@@ -39,6 +39,24 @@ func main() {
 	}
 	defer executor.Close()
 
+	// Uploader is optional — worker operates without artifact upload if MinIO is not configured.
+	var uploader *worker.Uploader
+	if endpoint := os.Getenv("MINIO_ENDPOINT"); endpoint != "" {
+		up, err := worker.NewUploader(
+			endpoint,
+			getEnv("MINIO_ACCESS_KEY", "minioadmin"),
+			getEnv("MINIO_SECRET_KEY", "minioadmin"),
+			getEnv("MINIO_BUCKET", "foreman-artifacts"),
+			os.Getenv("MINIO_USE_SSL") == "true",
+		)
+		if err != nil {
+			slog.Warn("artifact uploader unavailable", "error", err)
+		} else {
+			uploader = up
+			slog.Info("artifact uploader ready", "endpoint", endpoint)
+		}
+	}
+
 	hostname, _ := os.Hostname()
 
 	reg, err := client.Register(ctx, worker.RegisterParams{
@@ -90,7 +108,7 @@ func main() {
 					continue // 204 — queue empty
 				}
 				currentLoad.Add(1)
-				go runJob(ctx, client, executor, workerID, *job, &currentLoad)
+				go runJob(ctx, client, executor, uploader, workerID, *job, &currentLoad)
 			case <-ctx.Done():
 				return
 			}
@@ -105,6 +123,7 @@ func runJob(
 	ctx context.Context,
 	client *worker.Client,
 	executor *worker.Executor,
+	uploader *worker.Uploader,
 	workerID string,
 	job models.Job,
 	load *atomic.Int32,
@@ -146,16 +165,29 @@ func runJob(
 		slog.Warn("job stderr", "job_id", job.ID, "output", result.Stderr)
 	}
 
+	// Upload artifacts written to /output by the container.
+	var artifactPath string
+	if uploader != nil && result.ArtifactDir != "" {
+		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer uploadCancel()
+		if key, err := uploader.UploadArtifacts(uploadCtx, job.ID.String(), result.ArtifactDir); err != nil {
+			slog.Error("artifact upload failed", "job_id", job.ID, "error", err)
+		} else {
+			artifactPath = key
+		}
+	}
+
 	// Use a fresh context for the final report — parent ctx may already be cancelled
 	// on shutdown, but we still need the coordinator to record the result.
 	reportCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := client.ReportStatus(reportCtx, worker.ReportStatusParams{
-		JobID:    job.ID.String(),
-		Status:   finalStatus,
-		WorkerID: workerID,
-		LogsPath: result.LogsPath,
+		JobID:        job.ID.String(),
+		Status:       finalStatus,
+		WorkerID:     workerID,
+		LogsPath:     result.LogsPath,
+		ArtifactPath: artifactPath,
 	}); err != nil {
 		slog.Error("failed to report job result", "job_id", job.ID, "status", finalStatus, "error", err)
 	}
@@ -172,6 +204,13 @@ func persistID(id string) {
 func idFilePath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".foreman", "worker_id")
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func mustEnv(key string) string {

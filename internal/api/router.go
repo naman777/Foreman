@@ -10,11 +10,12 @@ import (
 )
 
 type Handler struct {
-	store *store.Store
+	store     *store.Store
+	artifacts store.ArtifactStore // nil when MinIO is not configured
 }
 
-func NewRouter(s *store.Store) http.Handler {
-	h := &Handler{store: s}
+func NewRouter(s *store.Store, artifacts store.ArtifactStore) http.Handler {
+	h := &Handler{store: s, artifacts: artifacts}
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)

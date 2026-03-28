@@ -18,11 +18,12 @@ import (
 )
 
 type ExecResult struct {
-	ExitCode int
-	Stdout   string
-	Stderr   string
-	LogsPath string
-	Duration time.Duration
+	ExitCode    int
+	Stdout      string
+	Stderr      string
+	LogsPath    string
+	ArtifactDir string // host path bound to /output inside the container
+	Duration    time.Duration
 }
 
 type Executor struct {
@@ -56,6 +57,13 @@ func (e *Executor) Run(ctx context.Context, job models.Job) (ExecResult, error) 
 		return ExecResult{}, fmt.Errorf("image pull: %w", err)
 	}
 
+	// Create a host-side directory bound to /output so the job can write
+	// output files that survive container removal.
+	artifactDir := filepath.Join(os.TempDir(), "foreman", "artifacts", job.ID.String())
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		return ExecResult{}, fmt.Errorf("artifact dir: %w", err)
+	}
+
 	resp, err := e.docker.ContainerCreate(
 		execCtx,
 		&container.Config{
@@ -63,6 +71,7 @@ func (e *Executor) Run(ctx context.Context, job models.Job) (ExecResult, error) 
 			Cmd:   []string{"sh", "-c", job.Command},
 		},
 		&container.HostConfig{
+			Binds: []string{fmt.Sprintf("%s:/output:rw", artifactDir)},
 			Resources: container.Resources{
 				Memory:   int64(job.RequiredMemory) * 1024 * 1024,
 				NanoCPUs: int64(job.RequiredCPU) * 1_000_000_000,
@@ -127,11 +136,12 @@ func (e *Executor) Run(ctx context.Context, job models.Job) (ExecResult, error) 
 	logsPath, _ := writeLogs(job.ID.String(), stdout.String(), stderr.String())
 
 	result := ExecResult{
-		ExitCode: exitCode,
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		LogsPath: logsPath,
-		Duration: duration,
+		ExitCode:    exitCode,
+		Stdout:      stdout.String(),
+		Stderr:      stderr.String(),
+		LogsPath:    logsPath,
+		ArtifactDir: artifactDir,
+		Duration:    duration,
 	}
 
 	if timedOut {

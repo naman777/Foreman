@@ -82,10 +82,11 @@ func (c *Client) PollJob(ctx context.Context, workerID string) (*models.Job, err
 }
 
 type ReportStatusParams struct {
-	JobID    string
-	Status   models.JobStatus
-	WorkerID string
-	LogsPath string
+	JobID        string
+	Status       models.JobStatus
+	WorkerID     string
+	LogsPath     string
+	ArtifactPath string
 }
 
 func (c *Client) ReportStatus(ctx context.Context, p ReportStatusParams) error {
@@ -95,6 +96,9 @@ func (c *Client) ReportStatus(ctx context.Context, p ReportStatusParams) error {
 	}
 	if p.LogsPath != "" {
 		payload["logs_path"] = p.LogsPath
+	}
+	if p.ArtifactPath != "" {
+		payload["artifact_path"] = p.ArtifactPath
 	}
 	body, _ := json.Marshal(payload)
 	return c.do(ctx, http.MethodPost, fmt.Sprintf("/jobs/%s/status", p.JobID), body, nil)

@@ -86,10 +86,11 @@ func (s *Store) GetJob(ctx context.Context, id uuid.UUID) (models.Job, error) {
 }
 
 type UpdateJobStatusParams struct {
-	JobID    uuid.UUID
-	Status   models.JobStatus
-	WorkerID *uuid.UUID
-	LogsPath *string
+	JobID        uuid.UUID
+	Status       models.JobStatus
+	WorkerID     *uuid.UUID
+	LogsPath     *string
+	ArtifactPath *string
 }
 
 func (s *Store) UpdateJobStatus(ctx context.Context, p UpdateJobStatusParams) (models.Job, error) {
@@ -136,10 +137,13 @@ func (s *Store) finaliseJob(ctx context.Context, p UpdateJobStatusParams) (model
 
 	rows, err := tx.Query(ctx, `
 		UPDATE jobs
-		SET status = $2, completed_at = NOW(), lock_expires_at = NULL,
-		    logs_path = COALESCE($3, logs_path)
+		SET status        = $2,
+		    completed_at  = NOW(),
+		    lock_expires_at = NULL,
+		    logs_path     = COALESCE($3, logs_path),
+		    artifact_path = COALESCE($4, artifact_path)
 		WHERE id = $1 RETURNING `+jobCols,
-		p.JobID, p.Status, p.LogsPath,
+		p.JobID, p.Status, p.LogsPath, p.ArtifactPath,
 	)
 	if err != nil {
 		return models.Job{}, err
