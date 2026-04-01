@@ -63,6 +63,9 @@ func main() {
 
 	s := store.New(pool)
 
+	hub := api.NewHub()
+	go hub.Run(ctx)
+
 	// MinIO artifact store (optional — coordinator starts without it if env vars are absent)
 	var artifacts store.ArtifactStore
 	if endpoint := os.Getenv("MINIO_ENDPOINT"); endpoint != "" {
@@ -93,7 +96,7 @@ func main() {
 	port := getEnv("PORT", "8080")
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", port),
-		Handler:      api.NewRouter(s, artifacts),
+		Handler:      api.NewRouter(s, artifacts, hub),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 	}

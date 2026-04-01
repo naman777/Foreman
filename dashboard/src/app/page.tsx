@@ -1,65 +1,117 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { api } from "@/lib/api";
+import type { MetricsSummary, WSEvent, Worker } from "@/lib/types";
+import { useWebSocket } from "@/hooks/useWebSocket";
+
+const STATUS_COLORS: Record<string, string> = {
+  Queued:    "#f59e0b",
+  Scheduled: "#3b82f6",
+  Running:   "#6366f1",
+  Completed: "#10b981",
+  Failed:    "#ef4444",
+  Timed_out: "#dc2626",
+  Cancelled: "#9ca3af",
+};
+
+function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+      <p className="text-sm text-zinc-500">{label}</p>
+      <p className={`mt-1 text-3xl font-semibold ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+export default function OverviewPage() {
+  const qc = useQueryClient();
+
+  const { data: metrics } = useQuery<MetricsSummary>({
+    queryKey: ["metrics"],
+    queryFn: api.metrics,
+    refetchInterval: 10_000,
+  });
+
+  const { data: workers } = useQuery<Worker[]>({
+    queryKey: ["workers"],
+    queryFn: api.workers,
+    refetchInterval: 10_000,
+  });
+
+  useWebSocket((e: WSEvent) => {
+    if (e.type === "job_updated") {
+      qc.invalidateQueries({ queryKey: ["metrics"] });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    }
+    if (e.type === "worker_registered" || e.type === "worker_heartbeat") {
+      qc.invalidateQueries({ queryKey: ["workers"] });
+    }
+  });
+
+  const m = metrics;
+  const activeWorkers = workers?.filter((w) => w.status === "online" || w.status === "busy").length ?? 0;
+
+  const chartData = m
+    ? [
+        { name: "Queued",    count: m.queued },
+        { name: "Scheduled", count: m.scheduled },
+        { name: "Running",   count: m.running },
+        { name: "Completed", count: m.completed },
+        { name: "Failed",    count: m.failed },
+        { name: "Timed_out", count: m.timed_out },
+        { name: "Cancelled", count: m.cancelled },
+      ].filter((d) => d.count > 0)
+    : [];
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-xl font-semibold">Overview</h1>
+
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        <StatCard label="Total Jobs"  value={m?.total ?? 0}     color="text-zinc-900" />
+        <StatCard label="Running"     value={m?.running ?? 0}   color="text-indigo-600" />
+        <StatCard label="Queued"      value={m?.queued ?? 0}    color="text-amber-600" />
+        <StatCard label="Completed"   value={m?.completed ?? 0} color="text-green-600" />
+        <StatCard label="Failed"      value={m?.failed ?? 0}    color="text-red-600" />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <p className="mb-4 text-sm font-medium text-zinc-700">Jobs by status</p>
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                  {chartData.map((d) => (
+                    <Cell key={d.name} fill={STATUS_COLORS[d.name] ?? "#6366f1"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="mt-8 text-center text-sm text-zinc-400">No jobs yet</p>
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <p className="mb-2 text-sm font-medium text-zinc-700">Workers</p>
+          <p className="text-3xl font-semibold text-zinc-900">{activeWorkers}</p>
+          <p className="text-sm text-zinc-400">active of {workers?.length ?? 0} registered</p>
+          <div className="mt-4 space-y-2">
+            {workers?.slice(0, 5).map((w) => (
+              <div key={w.id} className="flex items-center justify-between text-sm">
+                <span className="truncate text-zinc-600">{w.hostname}</span>
+                <span className="ml-2 text-zinc-400">load {w.current_load}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 }

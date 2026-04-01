@@ -205,6 +205,7 @@ func (h *Handler) updateJobStatus(w http.ResponseWriter, r *http.Request) {
 	meta, _ := json.Marshal(map[string]string{"status": string(req.Status)})
 	_ = h.store.CreateJobEvent(r.Context(), jobID, "status_changed", meta)
 
+	h.hub.Broadcast(WSEvent{Type: "job_updated", Payload: job})
 	writeJSON(w, http.StatusOK, job)
 }
 

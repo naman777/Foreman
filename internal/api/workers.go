@@ -43,6 +43,7 @@ func (h *Handler) registerWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to register worker")
 		return
 	}
+	h.hub.Broadcast(WSEvent{Type: "worker_registered", Payload: worker})
 	writeJSON(w, http.StatusCreated, worker)
 }
 
@@ -77,6 +78,9 @@ func (h *Handler) workerHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.hub.Broadcast(WSEvent{Type: "worker_heartbeat", Payload: map[string]any{
+		"worker_id": req.WorkerID, "current_load": req.CurrentLoad,
+	}})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
