@@ -13,44 +13,58 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// Allow all origins in development; tighten in production.
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
 type Handler struct {
 	store     *store.Store
-	artifacts store.ArtifactStore // nil when MinIO is not configured
+	artifacts store.ArtifactStore
 	hub       *Hub
+	sessions  *SessionStore
 }
 
-func NewRouter(s *store.Store, artifacts store.ArtifactStore, hub *Hub) http.Handler {
-	h := &Handler{store: s, artifacts: artifacts, hub: hub}
-	r := chi.NewRouter()
+// NewRouter wires up all routes with their respective auth middleware.
+//
+//	Public        — GET /health, POST /auth/login
+//	Worker auth   — POST /workers/register, POST /workers/heartbeat,
+//	                GET /jobs/next, POST /jobs/:id/status
+//	Dashboard auth — everything else (GET /workers, GET /jobs, GET /ws, …)
+func NewRouter(s *store.Store, artifacts store.ArtifactStore, hub *Hub, secret string) http.Handler {
+	sessions := newSessionStore()
+	h := &Handler{store: s, artifacts: artifacts, hub: hub, sessions: sessions}
 
+	r := chi.NewRouter()
 	r.Use(corsMiddleware)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 
+	// Public
 	r.Get("/health", h.health)
-	r.Get("/ws", h.wsHandler)
+	r.Post("/auth/login", loginHandler(secret, sessions))
 
-	r.Route("/workers", func(r chi.Router) {
-		r.Post("/register", h.registerWorker)
-		r.Post("/heartbeat", h.workerHeartbeat)
-		r.Get("/", h.listWorkers)
+	// Worker auth — pre-shared COORDINATOR_SECRET
+	r.Group(func(r chi.Router) {
+		r.Use(workerAuthMiddleware(secret))
+		r.Post("/workers/register", h.registerWorker)
+		r.Post("/workers/heartbeat", h.workerHeartbeat)
+		r.Get("/jobs/next", h.nextJob)
+		r.Post("/jobs/{id}/status", h.updateJobStatus)
 	})
 
-	r.Route("/jobs", func(r chi.Router) {
-		r.Post("/", h.submitJob)
-		r.Get("/", h.listJobs)
-		r.Get("/next", h.nextJob)
-		r.Get("/{id}", h.getJob)
-		r.Post("/{id}/status", h.updateJobStatus)
-		r.Get("/{id}/artifacts", h.getJobArtifacts)
+	// Dashboard auth — session token from POST /auth/login
+	r.Group(func(r chi.Router) {
+		r.Use(dashboardAuthMiddleware(sessions))
+		r.Get("/ws", h.wsHandler)
+		r.Get("/workers", h.listWorkers)
+		r.Get("/metrics/summary", h.metricsSummary)
+		r.Route("/jobs", func(r chi.Router) {
+			r.Post("/", h.submitJob)
+			r.Get("/", h.listJobs)
+			r.Get("/{id}", h.getJob)
+			r.Get("/{id}/artifacts", h.getJobArtifacts)
+		})
 	})
-
-	r.Get("/metrics/summary", h.metricsSummary)
 
 	return r
 }

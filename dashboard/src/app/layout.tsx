@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
+import { AuthGuard } from "@/components/AuthGuard";
 import Link from "next/link";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -39,9 +40,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </nav>
         <Providers>
-          <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-            {children}
-          </main>
+          <AuthGuard>
+            <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+              {children}
+            </main>
+          </AuthGuard>
         </Providers>
       </body>
     </html>

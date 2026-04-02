@@ -63,6 +63,8 @@ func main() {
 
 	s := store.New(pool)
 
+	secret := mustEnv("COORDINATOR_SECRET")
+
 	hub := api.NewHub()
 	go hub.Run(ctx)
 
@@ -96,7 +98,7 @@ func main() {
 	port := getEnv("PORT", "8080")
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", port),
-		Handler:      api.NewRouter(s, artifacts, hub),
+		Handler:      api.NewRouter(s, artifacts, hub, secret),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 	}

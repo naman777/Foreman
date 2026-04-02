@@ -12,10 +12,11 @@ import (
 const workerCols = `id, hostname, status, last_heartbeat, cpu_cores, memory_mb, labels, current_load, registered_at`
 
 type RegisterWorkerParams struct {
-	Hostname string
-	CPUCores int
-	MemoryMB int
-	Labels   json.RawMessage
+	Hostname  string
+	CPUCores  int
+	MemoryMB  int
+	Labels    json.RawMessage
+	TokenHash string
 }
 
 func (s *Store) RegisterWorker(ctx context.Context, p RegisterWorkerParams) (models.Worker, error) {
@@ -23,10 +24,10 @@ func (s *Store) RegisterWorker(ctx context.Context, p RegisterWorkerParams) (mod
 		p.Labels = json.RawMessage("{}")
 	}
 	rows, err := s.db.Query(ctx, `
-		INSERT INTO workers (hostname, cpu_cores, memory_mb, labels)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO workers (hostname, cpu_cores, memory_mb, labels, registered_token_hash)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING `+workerCols,
-		p.Hostname, p.CPUCores, p.MemoryMB, p.Labels,
+		p.Hostname, p.CPUCores, p.MemoryMB, p.Labels, p.TokenHash,
 	)
 	if err != nil {
 		return models.Worker{}, err

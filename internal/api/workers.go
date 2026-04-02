@@ -34,10 +34,11 @@ func (h *Handler) registerWorker(w http.ResponseWriter, r *http.Request) {
 	}
 
 	worker, err := h.store.RegisterWorker(r.Context(), store.RegisterWorkerParams{
-		Hostname: req.Hostname,
-		CPUCores: req.CPUCores,
-		MemoryMB: req.MemoryMB,
-		Labels:   req.Labels,
+		Hostname:  req.Hostname,
+		CPUCores:  req.CPUCores,
+		MemoryMB:  req.MemoryMB,
+		Labels:    req.Labels,
+		TokenHash: TokenHash(bearerToken(r)),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to register worker")
