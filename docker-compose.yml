@@ -59,10 +59,11 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      COORDINATOR_SECRET: dev-secret-change-in-prod
+      COORDINATOR_SECRET: ${COORDINATOR_SECRET:-dev-secret-change-in-prod}
       PORT: 8080
     ports:
       - "8080:8080"
+    restart: unless-stopped
     profiles:
       - app
 
@@ -74,13 +75,28 @@ services:
       - coordinator
     environment:
       COORDINATOR_URL: http://coordinator:8080
-      COORDINATOR_SECRET: dev-secret-change-in-prod
+      COORDINATOR_SECRET: ${COORDINATOR_SECRET:-dev-secret-change-in-prod}
       WORKER_CPU_CORES: 2
       WORKER_MEMORY_MB: 1024
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     deploy:
       replicas: 3
+    restart: unless-stopped
+    profiles:
+      - app
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - coordinator
+    restart: unless-stopped
     profiles:
       - app
 
