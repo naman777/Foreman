@@ -1,0 +1,26 @@
+{
+  "name": "foreman-node-coordinator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.6",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1140.0",
+    "@aws-sdk/s3-request-presigner": "^3.1140.0",
+    "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.1",
+    "pg": "^8.23.0",
+    "redis": "^6.2.1",
+    "ws": "^8.21.3"
+  }
+}

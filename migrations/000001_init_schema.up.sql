@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-CREATE TABLE workers (
+CREATE TABLE IF NOT EXISTS workers (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   hostname       TEXT NOT NULL,
   status         TEXT NOT NULL DEFAULT 'online',  -- online | busy | offline | unhealthy
@@ -13,7 +13,7 @@ CREATE TABLE workers (
   CONSTRAINT workers_status_check CHECK (status IN ('online', 'busy', 'offline', 'unhealthy'))
 );
 
-CREATE TABLE jobs (
+CREATE TABLE IF NOT EXISTS jobs (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name            TEXT,
   status          TEXT NOT NULL DEFAULT 'queued',
@@ -39,7 +39,7 @@ CREATE TABLE jobs (
   CONSTRAINT jobs_priority_check CHECK (priority BETWEEN 1 AND 10)
 );
 
-CREATE TABLE job_events (
+CREATE TABLE IF NOT EXISTS job_events (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id     UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
   event_type TEXT NOT NULL,
@@ -47,8 +47,8 @@ CREATE TABLE job_events (
   metadata   JSONB NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX idx_jobs_status     ON jobs(status);
-CREATE INDEX idx_jobs_priority   ON jobs(priority, submitted_at) WHERE status = 'queued';
-CREATE INDEX idx_jobs_worker_id  ON jobs(worker_id);
-CREATE INDEX idx_job_events_job  ON job_events(job_id, timestamp);
-CREATE INDEX idx_workers_status  ON workers(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_status     ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_priority   ON jobs(priority, submitted_at) WHERE status = 'queued';
+CREATE INDEX IF NOT EXISTS idx_jobs_worker_id  ON jobs(worker_id);
+CREATE INDEX IF NOT EXISTS idx_job_events_job  ON job_events(job_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_workers_status  ON workers(status);

@@ -44,61 +44,86 @@ services:
       timeout: 5s
       retries: 5
 
-  coordinator:
-    build:
-      context: .
-      dockerfile: Dockerfile.coordinator
+  migrate:
+    image: postgres:16-alpine
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: foreman
+      PGPASSWORD: foreman
+      PGDATABASE: foreman
+    volumes:
+      - ./migrations:/migrations:ro
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - |
+        psql -v ON_ERROR_STOP=1 -f /migrations/000001_init_schema.up.sql
+        psql -v ON_ERROR_STOP=1 -f /migrations/000002_add_token_hash.up.sql
+
+  coordinator:
+    build:
+      context: ./node/coordinator
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://foreman:foreman@postgres:5432/foreman?sslmode=disable
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       COORDINATOR_SECRET: ${COORDINATOR_SECRET:-dev-secret-change-in-prod}
       PORT: 8080
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
-    profiles:
-      - app
 
   worker:
     build:
-      context: .
-      dockerfile: Dockerfile.worker
+      context: ./node/worker
     depends_on:
-      - coordinator
+      coordinator:
+        condition: service_healthy
     environment:
       COORDINATOR_URL: http://coordinator:8080
       COORDINATOR_SECRET: ${COORDINATOR_SECRET:-dev-secret-change-in-prod}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
       WORKER_CPU_CORES: 2
       WORKER_MEMORY_MB: 1024
+      WORKER_MAX_PARALLEL_JOBS: 4
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     deploy:
       replicas: 3
     restart: unless-stopped
-    profiles:
-      - app
 
   dashboard:
     build:
       context: ./dashboard
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8080}
     ports:
-      - "3000:3000"
+      - "${DASHBOARD_PORT:-3000}:3000"
     depends_on:
-      - coordinator
+      coordinator:
+        condition: service_healthy
     restart: unless-stopped
-    profiles:
-      - app
 
 volumes:
   postgres_data:

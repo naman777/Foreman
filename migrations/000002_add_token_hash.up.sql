@@ -1,1 +1,1 @@
-ALTER TABLE workers ADD COLUMN registered_token_hash TEXT;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS registered_token_hash TEXT;
