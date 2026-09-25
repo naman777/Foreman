@@ -12,7 +12,7 @@ permissions:
 jobs:
   node-services:
     name: Test ${{ matrix.service }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -21,8 +21,8 @@ jobs:
       run:
         working-directory: node/${{ matrix.service }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
@@ -32,13 +32,13 @@ jobs:
 
   dashboard:
     name: Lint and build dashboard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: dashboard
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
       - run: npm install --global pnpm@10.30.3
@@ -52,13 +52,13 @@ jobs:
     name: Deploy production
     needs: [node-services, dashboard]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: Production
     concurrency:
       group: foreman-production
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure deploy key and pinned host key
         env:
           FOREMAN_DEPLOY_SSH_KEY: ${{ secrets.FOREMAN_DEPLOY_SSH_KEY }}
