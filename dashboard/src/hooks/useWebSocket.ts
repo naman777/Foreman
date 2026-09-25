@@ -6,7 +6,10 @@ import type { WSEvent } from "@/lib/types";
 
 export function useWebSocket(onEvent: (e: WSEvent) => void) {
   const cb = useRef(onEvent);
-  cb.current = onEvent;
+
+  useEffect(() => {
+    cb.current = onEvent;
+  }, [onEvent]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;

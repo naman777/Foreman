@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import type { Job, JobEvent, JobStatus, WSEvent } from "@/lib/types";
 import { JobStatusBadge } from "@/components/StatusBadge";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { fmt, duration, ago } from "@/lib/utils";
+import { fmt, duration } from "@/lib/utils";
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (

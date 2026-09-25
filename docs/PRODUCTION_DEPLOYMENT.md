@@ -15,7 +15,13 @@ chmod 600 .env.production
 
 The generator refuses to overwrite an existing file. Keep `.env.production` private and back it up through the VM's secret storage process. Never commit or print its credentials. The development `.env` is not used for production.
 
-## Deploy updates
+## Continuous deployment
+
+GitHub Actions runs the coordinator and worker TypeScript tests, dashboard lint, and dashboard production build on pull requests and pushes. A successful push to `main` then deploys that exact commit to the VM and checks the public HTTPS health and dashboard routes. Deployments run one at a time. The workflow is in `.github/workflows/ci-cd.yml`; its `production` job uses the `FOREMAN_DEPLOY_SSH_KEY` repository secret and the VM host key pinned in `.github/foreman_known_hosts`. The VM's deploy key is restricted to `deploy/ci-deploy.sh`. The script refuses a dirty tracked checkout, a missing `.env.production`, or a commit that is no longer the tip of `main`.
+
+The first deployment setup requires a dedicated SSH key in the GitHub secret, its public key in the VM user's `authorized_keys`, and a clean VM checkout at the latest `main` commit. The VM retains `.env.production` locally; it is never sent to GitHub Actions. Follow runs in the repository's **Actions** tab. The VM checkout's HEAD is the deployed revision after a successful run.
+
+## Manual deploy updates
 
 Transfer reviewed source changes into the VM checkout, then run:
 

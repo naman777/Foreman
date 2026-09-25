@@ -1,0 +1,78 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node-services:
+    name: Test ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [coordinator, worker]
+    defaults:
+      run:
+        working-directory: node/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: node/${{ matrix.service }}/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  dashboard:
+    name: Lint and build dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --global pnpm@10.30.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build
+        env:
+          NEXT_PUBLIC_API_URL: https://foreman.naman.sbs/api
+
+  deploy:
+    name: Deploy production
+    needs: [node-services, dashboard]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: Production
+    concurrency:
+      group: foreman-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure deploy key and pinned host key
+        env:
+          FOREMAN_DEPLOY_SSH_KEY: ${{ secrets.FOREMAN_DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$FOREMAN_DEPLOY_SSH_KEY" > "$HOME/.ssh/foreman_deploy"
+          chmod 600 "$HOME/.ssh/foreman_deploy"
+          cp .github/foreman_known_hosts "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Deploy tested commit
+        run: |
+          ssh -i "$HOME/.ssh/foreman_deploy" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            nkundra_be23@34.180.44.15 "$GITHUB_SHA"
