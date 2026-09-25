@@ -166,17 +166,25 @@ export class PostgresJobStore implements JobStore {
     try {
       await client.query('BEGIN');
       const result = await client.query<Job>(`
-        UPDATE jobs SET status = $2, completed_at = NOW(), lock_expires_at = NULL,
-          logs_path = COALESCE($3, logs_path), artifact_path = COALESCE($4, artifact_path)
+        UPDATE jobs SET
+          status = CASE WHEN $2 = 'failed' AND retries < max_retries THEN 'queued' ELSE $2 END,
+          retries = CASE WHEN $2 = 'failed' AND retries < max_retries THEN retries + 1 ELSE retries END,
+          worker_id = CASE WHEN $2 = 'failed' AND retries < max_retries THEN NULL ELSE worker_id END,
+          scheduled_at = CASE WHEN $2 = 'failed' AND retries < max_retries THEN NULL ELSE scheduled_at END,
+          started_at = CASE WHEN $2 = 'failed' AND retries < max_retries THEN NULL ELSE started_at END,
+          completed_at = CASE WHEN $2 = 'failed' AND retries < max_retries THEN NULL ELSE NOW() END,
+          lock_expires_at = NULL,
+          logs_path = COALESCE($3, logs_path),
+          artifact_path = CASE WHEN $2 = 'failed' AND retries < max_retries THEN NULL ELSE COALESCE($4, artifact_path) END
         WHERE id = $1 AND status = 'running' AND worker_id = $5
         RETURNING ${jobColumns}`,
       [input.jobID, input.status, input.logsPath, input.artifactPath, input.workerID]);
       const job = result.rows[0];
       if (!job) return null;
-      if (job.worker_id) {
+      if (input.workerID) {
         await client.query(
           'UPDATE workers SET current_load = GREATEST(0, current_load - 1) WHERE id = $1',
-          [job.worker_id],
+          [input.workerID],
         );
       }
       await client.query('COMMIT');

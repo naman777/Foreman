@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from "recharts";
 import { api } from "@/lib/api";
 import type { MetricsSummary, WSEvent, Worker } from "@/lib/types";
@@ -215,13 +216,16 @@ export default function OverviewPage() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="animate-fade-in">
+      <div className="animate-fade-in flex flex-wrap items-center justify-between gap-4">
+        <div>
         <h1 className="text-2xl font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>
           Overview
         </h1>
         <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-          Monitor your distributed job scheduler at a glance
+          Explore a live TypeScript job scheduler without signing in
         </p>
+        </div>
+        <Link href="/playground" className="btn-gradient">Run a live job →</Link>
       </div>
 
       {/* Stat Cards */}

@@ -2,10 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { clearToken } from "@/lib/api";
-import { useRouter } from "next/navigation";
 
 const NAV = [
+    {
+        href: "/playground",
+        label: "Try it live",
+        icon: (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+        ),
+    },
     {
         href: "/",
         label: "Overview",
@@ -44,18 +51,18 @@ const NAV = [
 
 export function Sidebar() {
     const pathname = usePathname();
-    const router = useRouter();
-
-    // Don't render sidebar on login page
-    if (pathname === "/login") return null;
-
-    function handleLogout() {
-        clearToken();
-        router.replace("/login");
-    }
 
     return (
-        <aside className="fixed left-0 top-0 bottom-0 w-[260px] z-40 flex flex-col"
+        <>
+        <nav className="md:hidden fixed inset-x-0 top-0 z-50 flex items-center justify-between gap-2 border-b px-4 py-3"
+            style={{ background: "rgba(10, 14, 26, 0.96)", borderColor: "var(--border-subtle)" }}>
+            <Link href="/" className="font-semibold" style={{ color: "var(--text-primary)" }}>Foreman</Link>
+            <div className="flex gap-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+                {NAV.map((item) => <Link key={item.href} href={item.href}
+                    style={{ color: pathname === item.href ? "var(--accent-primary)" : "var(--text-secondary)" }}>{item.label}</Link>)}
+            </div>
+        </nav>
+        <aside className="hidden md:flex fixed left-0 top-0 bottom-0 w-[260px] z-40 flex-col"
             style={{
                 background: "rgba(10, 14, 26, 0.85)",
                 backdropFilter: "blur(24px)",
@@ -123,27 +130,11 @@ export function Sidebar() {
             {/* Bottom section */}
             <div className="px-4 pb-6 space-y-2">
                 <div className="mx-1 h-px mb-3" style={{ background: "var(--border-subtle)" }} />
-                <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 cursor-pointer"
-                    style={{ color: "var(--text-muted)" }}
-                    onMouseEnter={(e) => {
-                        e.currentTarget.style.color = "#ef4444";
-                        e.currentTarget.style.background = "rgba(239, 68, 68, 0.08)";
-                    }}
-                    onMouseLeave={(e) => {
-                        e.currentTarget.style.color = "var(--text-muted)";
-                        e.currentTarget.style.background = "transparent";
-                    }}
-                >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                        <polyline points="16 17 21 12 16 7" />
-                        <line x1="21" y1="12" x2="9" y2="12" />
-                    </svg>
-                    Sign out
-                </button>
+                <p className="px-3 text-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                    Public live demo · TypeScript coordinator and workers
+                </p>
             </div>
         </aside>
+        </>
     );
 }

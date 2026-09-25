@@ -10,6 +10,7 @@ import { Scheduler, startScheduler } from './scheduler.js';
 import { PostgresSchedulerStore } from './scheduler-store.js';
 import WebSocket, { WebSocketServer } from 'ws';
 import { createArtifactStore } from './artifacts.js';
+import { DemoLimiter, demoScenarios, isDemoJob, isDemoScenario } from './demo.js';
 
 export interface Worker {
   id: string;
@@ -83,6 +84,7 @@ type Options = {
   artifacts?: ArtifactStore;
   broadcast?: (event: Event) => void;
   now?: () => number;
+  publicDemo?: boolean;
 };
 
 function json(response: ServerResponse, status: number, body: unknown): void {
@@ -114,15 +116,26 @@ function isUUID(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
-export function createCoordinatorServer({ secret, workers, jobs, artifacts, broadcast = () => {}, now = Date.now }: Options) {
+export function createCoordinatorServer({ secret, workers, jobs, artifacts, broadcast = () => {}, now = Date.now, publicDemo = false }: Options) {
   if (!secret) throw new Error('COORDINATOR_SECRET is required');
   const sessions = new Map<string, number>();
+  const demoLimiter = new DemoLimiter(now);
   const wss = new WebSocketServer({ noServer: true });
+  const demoWss = new WebSocketServer({ noServer: true });
   const emit = (event: Event): void => {
     broadcast(event);
     const message = JSON.stringify(event);
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.send(message);
+    }
+    if (event.type === 'job_updated' && event.payload &&
+        typeof event.payload === 'object' && isDemoJob(event.payload as Job)) {
+      const job = event.payload as Job;
+      const demoMessage = JSON.stringify({ type: event.type,
+        payload: { ...job, worker_id: null, logs_path: null } });
+      for (const client of demoWss.clients) {
+        if (client.readyState === WebSocket.OPEN) client.send(demoMessage);
+      }
     }
   };
 
@@ -149,6 +162,94 @@ export function createCoordinatorServer({ secret, workers, jobs, artifacts, broa
       const token = randomUUID();
       sessions.set(token, now() + 24 * 60 * 60 * 1000);
       json(response, 200, { token });
+      return;
+    }
+
+    if (publicDemo && path.startsWith('/demo/')) {
+      const demoDetail = /^\/demo\/jobs\/([^/]+)$/.exec(path);
+      const demoArtifacts = /^\/demo\/jobs\/([^/]+)\/artifacts$/.exec(path);
+      if (request.method === 'GET' && path === '/demo/workers') {
+        if (!workers) { error(response, 503, 'worker store not configured'); return; }
+        try {
+          const all = await workers.listWorkers();
+          json(response, 200, all.map((worker, index) => ({
+            id: `demo-worker-${index + 1}`, hostname: `Worker ${index + 1}`,
+            status: worker.status, last_heartbeat: worker.last_heartbeat,
+            cpu_cores: worker.cpu_cores, memory_mb: worker.memory_mb,
+            current_load: worker.current_load, registered_at: worker.registered_at,
+          })));
+        } catch { error(response, 500, 'failed to list demo workers'); }
+        return;
+      }
+      if (request.method === 'GET' && (path === '/demo/jobs' || path === '/demo/metrics/summary')) {
+        if (!jobs) { error(response, 503, 'job store not configured'); return; }
+        try {
+          const all = await jobs.listJobs({ status: '', workerID: null, limit: 200, offset: 0 });
+          const visible = all.filter(isDemoJob).map((job) => ({ ...job, worker_id: null, logs_path: null }));
+          if (path === '/demo/jobs') {
+            json(response, 200, visible);
+          } else {
+            const summary: Record<string, number> = {
+              queued: 0, scheduled: 0, running: 0, completed: 0, failed: 0,
+              timed_out: 0, cancelled: 0, total: visible.length,
+            };
+            for (const job of visible) {
+              if (Object.hasOwn(summary, job.status)) summary[job.status] = (summary[job.status] ?? 0) + 1;
+            }
+            json(response, 200, summary);
+          }
+        } catch { error(response, 500, 'failed to list demo jobs'); }
+        return;
+      }
+      if (request.method === 'POST' && path === '/demo/jobs') {
+        if (!jobs) { error(response, 503, 'job store not configured'); return; }
+        let body: Record<string, unknown>;
+        try { body = await readJson(request); }
+        catch { error(response, 400, 'invalid request body'); return; }
+        if (!isDemoScenario(body.scenario) || Object.keys(body).some((key) => key !== 'scenario')) {
+          error(response, 400, 'choose a supported demo scenario'); return;
+        }
+        try {
+          const summary = await jobs.getMetricsSummary();
+          if ((summary.queued ?? 0) + (summary.scheduled ?? 0) + (summary.running ?? 0) >= 6) {
+            error(response, 429, 'demo capacity reached; try again shortly'); return;
+          }
+          if (!demoLimiter.allow()) {
+            error(response, 429, 'demo rate limit reached; try again later'); return;
+          }
+          const scenario = demoScenarios[body.scenario];
+          const job = await jobs.createJob({
+            name: scenario.name, imageName: 'alpine:3.20', command: scenario.command,
+            requiredCPU: 1, requiredMemory: 128, maxRetries: scenario.maxRetries,
+            timeoutSeconds: scenario.timeoutSeconds, priority: scenario.priority,
+          });
+          try { await jobs.createJobEvent(job.id, 'submitted', { demo: true, scenario: body.scenario }); }
+          catch { /* The job remains visible if the event write fails. */ }
+          emit({ type: 'job_updated', payload: job });
+          json(response, 201, { ...job, worker_id: null, logs_path: null });
+        } catch { error(response, 500, 'failed to create demo job'); }
+        return;
+      }
+      if (request.method === 'GET' && (demoDetail || demoArtifacts)) {
+        if (!jobs) { error(response, 503, 'job store not configured'); return; }
+        const id = (demoDetail || demoArtifacts)?.[1];
+        if (!isUUID(id)) { error(response, 400, 'invalid job id'); return; }
+        try {
+          const job = await jobs.getJob(id);
+          if (!job || !isDemoJob(job)) { error(response, 404, 'demo job not found'); return; }
+          if (demoArtifacts) {
+            if (!job.artifact_path) { error(response, 404, 'no artifacts for this job'); return; }
+            if (!artifacts) { error(response, 503, 'artifact storage not configured'); return; }
+            json(response, 200, { object_key: job.artifact_path,
+              download_url: await artifacts.getPresignedURL(job.artifact_path), expires_in: '1h' });
+          } else {
+            json(response, 200, { job: { ...job, worker_id: null, logs_path: null },
+              events: await jobs.getJobEvents(id) });
+          }
+        } catch { error(response, 500, 'failed to get demo job'); }
+        return;
+      }
+      error(response, 404, 'not found');
       return;
     }
 
@@ -221,7 +322,7 @@ export function createCoordinatorServer({ secret, workers, jobs, artifacts, broa
           artifactPath: typeof body.artifact_path === 'string' ? body.artifact_path : null,
         });
         if (!job) { error(response, 404, 'job not found'); return; }
-        try { await jobs.createJobEvent(id, 'status_changed', { status }); } catch { /* Go ignores event write failures. */ }
+        try { await jobs.createJobEvent(id, 'status_changed', { status: job.status }); } catch { /* Go ignores event write failures. */ }
         emit({ type: 'job_updated', payload: job });
         json(response, 200, job);
       } catch { error(response, 500, 'failed to update job status'); }
@@ -326,6 +427,12 @@ export function createCoordinatorServer({ secret, workers, jobs, artifacts, broa
   });
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
+    if (publicDemo && url.pathname === '/demo/ws') {
+      demoWss.handleUpgrade(request, socket, head, (client) => {
+        demoWss.emit('connection', client, request);
+      });
+      return;
+    }
     if (url.pathname !== '/ws') { socket.destroy(); return; }
     const token = bearer(request) || url.searchParams.get('token') || '';
     if ((sessions.get(token) ?? 0) <= now()) {
@@ -337,7 +444,7 @@ export function createCoordinatorServer({ secret, workers, jobs, artifacts, broa
       wss.emit('connection', client, request);
     });
   });
-  server.on('close', () => wss.close());
+  server.on('close', () => { wss.close(); demoWss.close(); });
   return server;
 }
 
@@ -354,6 +461,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const artifacts = await createArtifactStore(process.env);
     const server = createCoordinatorServer({
       secret: process.env.COORDINATOR_SECRET ?? '',
+      publicDemo: process.env.PUBLIC_DEMO_ENABLED === 'true',
       workers: new PostgresWorkerStore(pool),
       jobs: new PostgresJobStore(pool),
       artifacts,

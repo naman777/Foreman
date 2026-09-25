@@ -1,6 +1,8 @@
 ﻿# Foreman
 
-Foreman is a distributed job scheduler built with a TypeScript coordinator, TypeScript Docker workers, a Next.js dashboard, PostgreSQL, Redis, and MinIO.
+Foreman is a distributed job scheduler built with a TypeScript coordinator, TypeScript Docker workers, a Next.js dashboard, PostgreSQL, Redis, and S3-compatible artifact storage.
+
+The public production site is [foreman.naman.sbs](https://foreman.naman.sbs). Recruiters can explore the dashboard and run guided jobs in **Try it live** without an account. The production deployment and HTTPS runbook are in [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md).
 
 ## Start
 
@@ -12,7 +14,7 @@ docker compose up -d --build
 
 Compose starts PostgreSQL, Redis, MinIO, applies the SQL schema, then starts one coordinator, three workers, and the dashboard. Existing database volumes are retained. Open the dashboard at http://localhost:3000. The API listens at http://localhost:8080.
 
-Sign in with `COORDINATOR_SECRET`. For local development its default is `dev-secret-change-in-prod`; set a different value in `.env` before sharing the service.
+The dashboard and guided job demos need no sign-in. The public API accepts five fixed job scenarios and limits submissions; it does not accept visitor-provided images or commands. The coordinator still uses `COORDINATOR_SECRET` privately for workers and administrative API calls; set a different value in `.env` before sharing the service.
 
 ```bash
 docker compose ps

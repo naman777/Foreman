@@ -1,0 +1,164 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: foreman
+      POSTGRES_PASSWORD: ${FOREMAN_DB_PASSWORD:?set FOREMAN_DB_PASSWORD}
+      POSTGRES_DB: foreman
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foreman -d foreman"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  minio:
+    image: rustfs/rustfs@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+    command: /data
+    environment:
+      RUSTFS_ACCESS_KEY: ${FOREMAN_MINIO_USER:?set FOREMAN_MINIO_USER}
+      RUSTFS_SECRET_KEY: ${FOREMAN_MINIO_PASSWORD:?set FOREMAN_MINIO_PASSWORD}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "false"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: foreman
+      PGPASSWORD: ${FOREMAN_DB_PASSWORD:?set FOREMAN_DB_PASSWORD}
+      PGDATABASE: foreman
+    volumes:
+      - ./migrations:/migrations:ro
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - |
+        psql -v ON_ERROR_STOP=1 -f /migrations/000001_init_schema.up.sql
+        psql -v ON_ERROR_STOP=1 -f /migrations/000002_add_token_hash.up.sql
+
+  coordinator:
+    build:
+      context: ./node/coordinator
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://foreman:${FOREMAN_DB_PASSWORD:?set FOREMAN_DB_PASSWORD}@postgres:5432/foreman?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ENDPOINT: https://${FOREMAN_DOMAIN:?set FOREMAN_DOMAIN}
+      MINIO_ACCESS_KEY: ${FOREMAN_MINIO_USER:?set FOREMAN_MINIO_USER}
+      MINIO_SECRET_KEY: ${FOREMAN_MINIO_PASSWORD:?set FOREMAN_MINIO_PASSWORD}
+      MINIO_BUCKET: foreman-artifacts
+      COORDINATOR_SECRET: ${COORDINATOR_SECRET:?set COORDINATOR_SECRET}
+      PUBLIC_DEMO_ENABLED: "true"
+      PORT: 8080
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./node/worker
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      COORDINATOR_URL: http://coordinator:8080
+      COORDINATOR_SECRET: ${COORDINATOR_SECRET:?set COORDINATOR_SECRET}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${FOREMAN_MINIO_USER:?set FOREMAN_MINIO_USER}
+      MINIO_SECRET_KEY: ${FOREMAN_MINIO_PASSWORD:?set FOREMAN_MINIO_PASSWORD}
+      MINIO_BUCKET: foreman-artifacts
+      WORKER_CPU_CORES: 1
+      WORKER_MEMORY_MB: 1024
+      WORKER_MAX_PARALLEL_JOBS: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        NEXT_PUBLIC_API_URL: https://${FOREMAN_DOMAIN:?set FOREMAN_DOMAIN}/api
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    depends_on:
+      coordinator:
+        condition: service_healthy
+      dashboard:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      FOREMAN_DOMAIN: ${FOREMAN_DOMAIN:?set FOREMAN_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  caddy_data:
+    external: true
+    name: operator-production_caddy-data
+  caddy_config:
+    external: true
+    name: operator-production_caddy-config

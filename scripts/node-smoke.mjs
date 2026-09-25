@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const base = process.env.FOREMAN_API_URL ?? 'http://localhost:8080';
 const dashboard = process.env.FOREMAN_DASHBOARD_URL ?? 'http://localhost:3000';
 const secret = process.env.COORDINATOR_SECRET ?? 'dev-secret-change-in-prod';
+const minWorkers = Number(process.env.FOREMAN_MIN_WORKERS ?? 3);
 const terminal = new Set(['completed', 'failed', 'timed_out', 'cancelled']);
 
 async function request(path, { token, method = 'GET', body } = {}) {
@@ -42,7 +43,7 @@ async function main() {
   assert.ok(token);
   const workers = await request('/workers', { token });
   assert.equal(workers.status, 200);
-  assert.ok(workers.data.filter((worker) => worker.status === 'online').length >= 3);
+  assert.ok(workers.data.filter((worker) => worker.status === 'online').length >= minWorkers);
   assert.equal((await request('/metrics/summary', { token })).status, 200);
   assert.equal((await request('/jobs', { token })).status, 200);
   const loginPage = await fetch(`${dashboard}/login`);

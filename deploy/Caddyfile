@@ -1,0 +1,34 @@
+{$FOREMAN_DOMAIN} {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    handle /api/demo/* {
+        uri strip_prefix /api
+        reverse_proxy coordinator:8080
+    }
+
+    handle /api/health {
+        uri strip_prefix /api
+        reverse_proxy coordinator:8080
+    }
+
+    handle /api/* {
+        respond 404
+    }
+
+    handle /foreman-artifacts/* {
+        reverse_proxy minio:9000
+    }
+
+    handle {
+        reverse_proxy dashboard:3000
+    }
+}
+

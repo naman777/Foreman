@@ -46,11 +46,10 @@ export default function JobsPage() {
             Browse and monitor all scheduled jobs
           </p>
         </div>
-        <span className="text-xs px-2.5 py-1 rounded-full"
-          style={{ background: "rgba(99, 102, 241, 0.1)", color: "var(--accent-primary)" }}
-        >
-          {jobs.length} shown
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs px-2.5 py-1 rounded-full" style={{ background: "rgba(99, 102, 241, 0.1)", color: "var(--accent-primary)" }}>{jobs.length} shown</span>
+          <Link href="/playground" className="btn-gradient text-sm">Run a demo →</Link>
+        </div>
       </div>
 
       {/* Status filter tabs */}

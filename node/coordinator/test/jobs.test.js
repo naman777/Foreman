@@ -13,7 +13,7 @@ const jobs = {
   async getJob(jobID) { return jobID === id ? job : null; },
   async getJobEvents() { return [{ event_type: 'submitted' }]; },
   async getNextJob(workerID) { calls.push(['next', workerID]); return job; },
-  async updateJobStatus(input) { calls.push(['status', input]); return job; },
+  async updateJobStatus(input) { calls.push(['status', input]); return { ...job, status: input.status }; },
   async getMetricsSummary() { return { queued: 2, total: 2 }; },
 };
 const server = createCoordinatorServer({ secret: 'secret', jobs });
@@ -110,6 +110,8 @@ test('claim and final status use one database client per transaction', async () 
     logsPath: 'logs/key', artifactPath: 'artifacts/key' });
   assert.deepEqual(statements[5].values, [id, 'completed', 'logs/key', 'artifacts/key', id]);
   assert.match(statements[5].sql, /status = 'running' AND worker_id = \$5/);
+  assert.match(statements[5].sql, /status = CASE WHEN \$2 = 'failed' AND retries < max_retries THEN 'queued'/);
+  assert.match(statements[5].sql, /retries = CASE WHEN \$2 = 'failed' AND retries < max_retries THEN retries \+ 1/);
   assert.match(statements[6].sql, /current_load = GREATEST/);
   assert.equal(statements[7].sql, 'COMMIT');
   assert.equal(released, 2);
