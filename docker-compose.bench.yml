@@ -1,0 +1,10 @@
+# Adds a second coordinator for the double-assignment benchmark.
+#   docker compose -f docker-compose.yml -f docker-compose.bench.yml up -d --build
+# Both coordinators share Postgres + Redis and each run their own scheduler and monitor.
+services:
+  coordinator2:
+    extends:
+      file: docker-compose.yml
+      service: coordinator
+    ports:
+      - "${API_PORT_2:-8081}:8080"
