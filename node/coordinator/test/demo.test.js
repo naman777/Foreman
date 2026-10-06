@@ -63,3 +63,9 @@ test('public submission accepts fixed scenarios only and is rate limited', async
   assert.equal(created[1].timeoutSeconds, 2);
   assert.equal((await fetch(`${base}/jobs`, { method: 'POST' })).status, 401);
 });
+
+test('demo logs and cancel are limited to demo jobs', async () => {
+  assert.equal((await fetch(`${base}/demo/jobs/${privateID}/logs`)).status, 404);
+  assert.equal((await fetch(`${base}/demo/jobs/${privateID}/cancel`, { method: 'POST' })).status, 404);
+  assert.equal((await fetch(`${base}/demo/jobs/${demoID}/logs`)).status, 404);
+});

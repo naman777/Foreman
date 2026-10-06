@@ -1,0 +1,3 @@
+# Files mounted into Linux containers must keep LF endings on every platform.
+*.sh text eol=lf
+*.sql text eol=lf

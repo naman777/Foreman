@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import WebSocket from 'ws';
 import { S3Client } from '@aws-sdk/client-s3';
@@ -13,7 +14,8 @@ const jobs = {
   async createJobEvent() {},
 };
 const artifacts = { async getPresignedURL(key) { return `https://example.test/${key}`; } };
-const server = createCoordinatorServer({ secret: 'secret', jobs, artifacts });
+const workers = { async verifyToken(workerID, hash) { return workerID === id && hash === createHash('sha256').update('worker-token').digest('hex'); } };
+const server = createCoordinatorServer({ secret: 'secret', jobs, artifacts, workers });
 let base;
 let token;
 before(async () => {
@@ -68,8 +70,8 @@ test('WebSocket uses dashboard token and broadcasts job event envelope', async (
   await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
   const nextMessage = new Promise((resolve) => ws.once('message', (data) => resolve(JSON.parse(data.toString()))));
   const response = await fetch(`${base}/jobs/${id}/status`, { method: 'POST',
-    headers: { Authorization: 'Bearer secret', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'completed' }) });
+    headers: { Authorization: 'Bearer worker-token', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'completed', worker_id: id }) });
   assert.equal(response.status, 200);
   assert.deepEqual(await nextMessage, { type: 'job_updated', payload: job });
   ws.close();

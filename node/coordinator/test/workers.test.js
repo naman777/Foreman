@@ -15,6 +15,7 @@ const store = {
   async registerWorker(input) { calls.push(['register', input]); return worker; },
   async updateHeartbeat(id, load) { calls.push(['heartbeat', id, load]); return id === workerID; },
   async listWorkers() { return [worker]; },
+  async verifyToken(id, hash) { return id === workerID && hash === createHash('sha256').update('worker-token').digest('hex'); },
 };
 let clock = 1000;
 const server = createCoordinatorServer({
@@ -39,23 +40,24 @@ test('worker registration checks auth, defaults, token hash and event', async ()
   assert.equal((await post('/workers/register', {})).status, 400);
   const response = await post('/workers/register', { hostname: 'worker-1' });
   assert.equal(response.status, 201);
-  assert.deepEqual(await response.json(), worker);
+  const { token, ...registered } = await response.json();
+  assert.deepEqual(registered, worker);
+  assert.match(token, /^[0-9a-f]{64}$/);
   assert.deepEqual(calls.at(-1), ['register', {
-    hostname: 'worker-1', cpuCores: 1, memoryMB: 512, labels: {},
-    tokenHash: createHash('sha256').update('test-secret').digest('hex'),
+    workerID: null, hostname: 'worker-1', cpuCores: 1, memoryMB: 512, labels: {},
+    tokenHash: createHash('sha256').update(token).digest('hex'),
   }]);
+  assert.notEqual(calls.at(-1)[1].tokenHash, createHash('sha256').update('test-secret').digest('hex'));
   assert.deepEqual(events.at(-1), { type: 'worker_registered', payload: worker });
 });
 
 test('heartbeat validates worker ID and reports missing worker', async () => {
-  assert.equal((await post('/workers/heartbeat', { worker_id: 'bad' })).status, 400);
-  const missing = await post('/workers/heartbeat', {
-    worker_id: '123e4567-e89b-42d3-a456-426614174001', current_load: 1,
-  });
-  assert.equal(missing.status, 404);
-  const response = await post('/workers/heartbeat', { worker_id: workerID, current_load: 2 });
+  assert.equal((await post('/workers/heartbeat', { worker_id: 'bad' }, 'worker-token')).status, 400);
+  assert.equal((await post('/workers/heartbeat', { worker_id: workerID, current_load: 1 })).status, 401, 'shared secret is rejected');
+  assert.equal((await post('/workers/heartbeat', { worker_id: workerID }, 'someone-elses-token')).status, 401);
+  const response = await post('/workers/heartbeat', { worker_id: workerID, current_load: 2 }, 'worker-token');
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { status: 'ok' });
+  assert.deepEqual(await response.json(), { status: 'ok', cancel_jobs: [] });
   assert.deepEqual(calls.at(-1), ['heartbeat', workerID, 2]);
   assert.deepEqual(events.at(-1), {
     type: 'worker_heartbeat', payload: { worker_id: workerID, current_load: 2 },

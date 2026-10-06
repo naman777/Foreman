@@ -17,7 +17,7 @@ The generator refuses to overwrite an existing file. Keep `.env.production` priv
 
 ## Continuous deployment
 
-GitHub Actions runs the coordinator and worker TypeScript tests, dashboard lint, and dashboard production build on pull requests and pushes. A successful push to `main` then deploys that exact commit to the VM and checks the public HTTPS health and dashboard routes. Deployments run one at a time. The workflow is in `.github/workflows/ci-cd.yml`; its `production` job uses the `FOREMAN_DEPLOY_SSH_KEY` repository secret and the VM host key pinned in `.github/foreman_known_hosts`. The VM's deploy key is restricted to `deploy/ci-deploy.sh`. The script refuses a dirty tracked checkout, a missing `.env.production`, or a commit that is no longer the tip of `main`.
+GitHub Actions runs the coordinator and worker TypeScript tests (the coordinator's integration tests execute its SQL against a real PostgreSQL service), dashboard lint and production build, and an end-to-end smoke test of the full Compose stack on pull requests and pushes. A successful push to `main` then deploys that exact commit to the VM, takes a database backup first, and checks the public HTTPS health and dashboard routes. If a check fails, the script resets the checkout to the previous commit and redeploys it automatically; migrations are additive, so the older code keeps working against the newer schema. Deployments run one at a time. The workflow is in `.github/workflows/ci-cd.yml`; its `production` job uses the `FOREMAN_DEPLOY_SSH_KEY` repository secret and the VM host key pinned in `.github/foreman_known_hosts`. The VM's deploy key is restricted to `deploy/ci-deploy.sh`. The script refuses a dirty tracked checkout, a missing `.env.production`, or a commit that is no longer the tip of `main`.
 
 The first deployment setup requires a dedicated SSH key in the GitHub secret, its public key in the VM user's `authorized_keys`, and a clean VM checkout at the latest `main` commit. The VM retains `.env.production` locally; it is never sent to GitHub Actions. Follow runs in the repository's **Actions** tab. The VM checkout's HEAD is the deployed revision after a successful run.
 
@@ -33,7 +33,7 @@ docker compose -p foreman-production --env-file .env.production -f docker-compos
 docker compose -p foreman-production --env-file .env.production -f docker-compose.prod.yml ps
 ```
 
-The migration helper applies idempotent SQL schema files before the coordinator starts. The worker has Docker socket access to run jobs. This grants the worker broad control of the VM's Docker daemon, so restrict VM access and treat the worker image as trusted code.
+The migration helper (`deploy/migrate.sh`) applies each `migrations/*.up.sql` file once, in order, and records it in the `schema_migrations` table before the coordinator starts. Add a new numbered pair of files to change the schema; no Compose edit is needed. The worker has Docker socket access to run jobs. This grants the worker broad control of the VM's Docker daemon, so restrict VM access and treat the worker image as trusted code.
 
 ## Verify
 
@@ -56,7 +56,27 @@ docker compose -p foreman-production --env-file .env.production -f docker-compos
 
 The smoke test creates real test jobs and artifacts. Review logs with `docker compose -p foreman-production --env-file .env.production -f docker-compose.prod.yml logs --tail 100 coordinator worker dashboard caddy`.
 
+## Backups and restore
+
+`deploy/backup.sh` writes a compressed `pg_dump` of the database to `~/foreman-backups` (override with `FOREMAN_BACKUP_DIR`) and keeps the newest 14 (`FOREMAN_BACKUP_KEEP`). Every deploy runs it first. Schedule it nightly on the VM:
+
+```sh
+17 3 * * *  /home/nkundra_be23/Foreman/deploy/backup.sh >> /home/nkundra_be23/foreman-backups/backup.log 2>&1
+```
+
+`deploy/restore.sh <dump>` stops the application services, replaces the database after a typed confirmation, and starts them again. Artifacts and logs live in object storage, not in the dump; back up the RustFS volume separately if they matter. Copy dumps off the VM periodically, since a backup on the same disk does not survive losing it.
+
+## Monitoring and retention
+
+The coordinator logs one JSON object per line (`docker compose ... logs coordinator`). `/health` checks PostgreSQL and Redis and returns 503 when either is down, so the container health check reflects real dependency state. `/metrics` serves Prometheus text (`foreman_jobs{status}`, `foreman_workers{status}`, `foreman_http_responses_total{code}`). Caddy only forwards `/api/demo` and `/api/health`, so `/metrics` is reachable from inside the Compose network only; scrape it from a sidecar or add a protected Caddy route.
+
+The monitor deletes finished jobs older than `RETENTION_DAYS` (default 30; set `FOREMAN_RETENTION_DAYS` in `.env.production`, `0` keeps everything) and offline workers silent for 24 hours, and applies a matching expiry rule to the artifact bucket when the storage backend supports lifecycle rules. Workers also delete a job's local files after upload and remove job containers that outlive their timeout by more than a minute, for example after a worker crash.
+
 ## Rollback
+
+A failed automatic deploy rolls itself back (see Continuous deployment). To undo a deploy that passed its health checks, push a revert commit to `main`; the pipeline deploys it like any other change.
+
+To fall back to the retained Operator stack instead:
 
 Stop Foreman's public proxy, then restart Operator's retained containers:
 

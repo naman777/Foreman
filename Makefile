@@ -15,7 +15,7 @@ migrate:
 build:
 	npm --prefix node/coordinator run build
 	npm --prefix node/worker run build
-	npm --prefix dashboard run build
+	pnpm --dir dashboard build
 
 test:
 	npm --prefix node/coordinator test

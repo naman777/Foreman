@@ -29,15 +29,34 @@ if [[ "$current_main" != "$revision" ]]; then
   exit 0
 fi
 
-git merge --ff-only "$revision"
+previous="$(git rev-parse HEAD)"
 compose=(docker compose -p foreman-production --env-file .env.production -f docker-compose.prod.yml)
-"${compose[@]}" config --quiet
-"${compose[@]}" build coordinator worker dashboard
-"${compose[@]}" up -d --no-build
 
-curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
-  https://foreman.naman.sbs/api/health >/dev/null
-curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
-  --head https://foreman.naman.sbs/ >/dev/null
+# Never block a deploy on a failed backup, but make the failure visible.
+bash ./deploy/backup.sh || echo 'WARNING: pre-deploy database backup failed.' >&2
+
+# Each step returns 1 on failure; `set -e` does not apply inside an `if` condition.
+release() {
+  git merge --ff-only "$1" || return 1
+  "${compose[@]}" config --quiet || return 1
+  "${compose[@]}" build coordinator worker dashboard || return 1
+  "${compose[@]}" up -d --no-build || return 1
+  curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
+    https://foreman.naman.sbs/api/health >/dev/null || return 1
+  curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors \
+    --head https://foreman.naman.sbs/ >/dev/null || return 1
+}
+
+if ! release "$revision"; then
+  echo "Deploy of $revision failed; rolling back to $previous." >&2
+  # The tree was clean before the merge, so resetting discards nothing of value.
+  git reset --hard "$previous"
+  "${compose[@]}" build coordinator worker dashboard
+  "${compose[@]}" up -d --no-build
+  "${compose[@]}" ps
+  echo "Rolled back to $previous. Database migrations are additive and were not reverted." >&2
+  exit 1
+fi
+
 "${compose[@]}" ps
 echo "Deployed $revision to https://foreman.naman.sbs"

@@ -17,6 +17,21 @@ jobs:
       fail-fast: false
       matrix:
         service: [coordinator, worker]
+    # The coordinator's integration tests run its SQL against a real PostgreSQL.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: foreman
+          POSTGRES_PASSWORD: foreman
+          POSTGRES_DB: foreman_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foreman -d foreman_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      FOREMAN_TEST_DATABASE_URL: postgres://foreman:foreman@localhost:5432/foreman_test
     defaults:
       run:
         working-directory: node/${{ matrix.service }}
@@ -29,6 +44,16 @@ jobs:
           cache-dependency-path: node/${{ matrix.service }}/package-lock.json
       - run: npm ci
       - run: npm test
+
+  shared-types:
+    name: Shared types are in sync
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: node scripts/sync-shared-types.mjs --check
 
   dashboard:
     name: Lint and build dashboard
@@ -48,9 +73,33 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: https://foreman.naman.sbs/api
 
+  smoke:
+    name: Compose smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Start the stack
+        run: |
+          docker compose up -d --build
+          timeout 240 sh -c 'until curl -fsS http://localhost:8080/health >/dev/null && curl -fsS http://localhost:3000/ >/dev/null; do sleep 3; done'
+      - name: Run end-to-end smoke test
+        run: node scripts/node-smoke.mjs
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=200
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
+
   deploy:
     name: Deploy production
-    needs: [node-services, dashboard]
+    needs: [node-services, shared-types, dashboard, smoke]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: Production

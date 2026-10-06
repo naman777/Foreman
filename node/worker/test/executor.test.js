@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -58,6 +58,15 @@ test('executor applies limits, captures logs, and removes container', async () =
     assert.equal(calls[0][1].HostConfig.Memory, 256 * 1024 * 1024);
     assert.equal(calls[0][1].HostConfig.NanoCpus, 2_000_000_000);
     assert.deepEqual(calls[0][1].Volumes, { '/output': {} });
+    const host = calls[0][1].HostConfig;
+    assert.equal(host.NetworkMode, 'none');
+    assert.deepEqual(host.CapDrop, ['ALL']);
+    assert.deepEqual(host.SecurityOpt, ['no-new-privileges']);
+    assert.equal(host.ReadonlyRootfs, true);
+    assert.equal(host.PidsLimit, 512);
+    assert.equal(host.LogConfig.Config['max-size'], '1m');
+    assert.equal(calls[0][1].Labels['foreman.job'], 'job-1');
+    assert.ok(Number(calls[0][1].Labels['foreman.deadline']) > Date.now());
     assert.deepEqual(calls.at(-1), ['remove', { force: true, v: true }]);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -82,6 +91,85 @@ test('executor stops a timed-out container', async () => {
     assert.equal(result.exitCode, -1);
     assert.equal(stopped, true);
     assert.equal(removed, true);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('job network is configurable and cancel kills the running container', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'foreman-worker-test-'));
+  let created;
+  let killed = false;
+  let finish;
+  const docker = {
+    getImage() { return { async inspect() {} }; },
+    async createContainer(options) {
+      created = options;
+      return {
+        async start() {},
+        wait() { return new Promise((resolve) => { finish = () => resolve({ StatusCode: 137 }); }); },
+        async kill() { killed = true; finish(); },
+        async logs() { return Buffer.alloc(0); },
+        async getArchive() { return Readable.from(await archive('output/', '')); },
+        async remove() {},
+      };
+    },
+  };
+  try {
+    const executor = new DockerExecutor(docker, dir, { network: 'bridge' });
+    const running = executor.run(job);
+    while (!finish) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(await executor.cancel('missing'), false);
+    assert.equal(await executor.cancel('job-1'), true);
+    const result = await running;
+    assert.equal(created.HostConfig.NetworkMode, 'bridge');
+    assert.equal(killed, true);
+    assert.equal(result.cancelled, true);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('executor keeps only the tail of very long logs', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'foreman-worker-test-'));
+  const big = 'x'.repeat(600 * 1024);
+  const docker = {
+    getImage() { return { async inspect() {} }; },
+    async createContainer() { return {
+      async start() {}, async wait() { return { StatusCode: 0 }; },
+      async logs() { return frame(1, big); },
+      async getArchive() { return Readable.from(await archive('output/', '')); },
+      async remove() {},
+    }; },
+  };
+  try {
+    const result = await new DockerExecutor(docker, dir).run(job);
+    assert.ok(result.stdout.length < 520 * 1024);
+    assert.match(result.stdout, /^\[earlier output truncated\]/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('reaper removes only containers past their deadline, and cleanup deletes local files', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'foreman-worker-test-'));
+  const removed = [];
+  const docker = {
+    async listContainers(options) {
+      assert.deepEqual(options.filters, { label: ['foreman.job'] });
+      return [
+        { Id: 'old', Labels: { 'foreman.deadline': String(Date.now() - 1000) } },
+        { Id: 'live', Labels: { 'foreman.deadline': String(Date.now() + 60_000) } },
+        { Id: 'unlabelled', Labels: {} },
+      ];
+    },
+    getContainer(id) { return { async remove(options) { removed.push([id, options]); } }; },
+  };
+  try {
+    const executor = new DockerExecutor(docker, dir);
+    assert.equal(await executor.reapExpired(), 1);
+    assert.deepEqual(removed, [['old', { force: true, v: true }]]);
+    await mkdir(join(dir, 'artifacts', 'job-1'), { recursive: true });
+    await mkdir(join(dir, 'jobs', 'job-1'), { recursive: true });
+    await executor.cleanup('job-1', true);
+    await assert.rejects(stat(join(dir, 'artifacts', 'job-1')));
+    await stat(join(dir, 'jobs', 'job-1'));
+    await executor.cleanup('job-1', false);
+    await assert.rejects(stat(join(dir, 'jobs', 'job-1')));
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

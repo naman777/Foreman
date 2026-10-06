@@ -11,13 +11,13 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "@types/dockerode": "^4.0.1",
     "@types/node": "24.13.6",
+    "@types/tar-stream": "^3.1.4",
     "typescript": "5.9.3"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1140.0",
-    "@types/dockerode": "^4.0.1",
-    "@types/tar-stream": "^3.1.4",
     "dockerode": "^5.0.1",
     "tar-stream": "^3.2.1"
   }

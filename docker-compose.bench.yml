@@ -8,3 +8,9 @@ services:
       service: coordinator
     ports:
       - "${API_PORT_2:-8081}:8080"
+
+  # Benchmark jobs report back to a collector on the host, so they need outbound networking
+  # (job containers are network-isolated by default).
+  worker:
+    environment:
+      WORKER_JOB_NETWORK: bridge

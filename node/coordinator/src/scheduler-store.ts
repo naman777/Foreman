@@ -1,18 +1,17 @@
 import type { Pool } from 'pg';
-import type { Job } from './server.js';
+import { jobColumns } from './columns.js';
 import type { SchedulerStore, WorkerWithLoad } from './scheduler.js';
-
-const jobColumns = `id, name, status, submitted_at, scheduled_at, started_at, completed_at,
-  retries, max_retries, timeout_seconds, required_cpu, required_memory, worker_id,
-  image_name, command, logs_path, artifact_path, lock_expires_at, priority`;
+import type { Job } from './types.js';
 
 export class PostgresSchedulerStore implements SchedulerStore {
   constructor(private readonly pool: Pool) {}
 
   async getQueuedJobs(limit: number): Promise<Job[]> {
+    // Higher priority first; jobs in retry backoff are skipped until run_after passes.
     const result = await this.pool.query<Job>(`
-      SELECT ${jobColumns} FROM jobs WHERE status = 'queued'
-      ORDER BY priority ASC, submitted_at ASC LIMIT $1`, [limit]);
+      SELECT ${jobColumns} FROM jobs
+      WHERE status = 'queued' AND (run_after IS NULL OR run_after <= NOW())
+      ORDER BY priority DESC, submitted_at ASC LIMIT $1`, [limit]);
     return result.rows;
   }
 

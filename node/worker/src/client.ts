@@ -1,36 +1,6 @@
-export interface Worker {
-  id: string;
-  hostname: string;
-  status: 'online' | 'busy' | 'offline' | 'unhealthy';
-  last_heartbeat: string | null;
-  cpu_cores: number;
-  memory_mb: number;
-  labels: Record<string, unknown>;
-  current_load: number;
-  registered_at: string;
-}
+import type { Job, Worker } from './shared.js';
 
-export interface Job {
-  id: string;
-  name: string | null;
-  status: string;
-  submitted_at: string;
-  scheduled_at: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  retries: number;
-  max_retries: number;
-  timeout_seconds: number;
-  required_cpu: number;
-  required_memory: number;
-  worker_id: string | null;
-  image_name: string;
-  command: string;
-  logs_path: string | null;
-  artifact_path: string | null;
-  lock_expires_at: string | null;
-  priority: number;
-}
+export type { Job, Worker } from './shared.js';
 
 export type ReportStatus = {
   jobID: string;
@@ -40,38 +10,63 @@ export type ReportStatus = {
   artifactPath?: string;
 };
 
+export class CoordinatorError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 export class CoordinatorClient {
+  /** Per-worker credential issued by `register`; every later call authenticates with it. */
+  private token: string | null = null;
+
   constructor(private readonly baseURL: string, private readonly secret: string) {}
 
-  private async request(path: string, method: 'GET' | 'POST', body?: unknown): Promise<Response> {
+  private async request(path: string, method: 'GET' | 'POST', body?: unknown,
+    timeoutMs = 10_000, credential = this.token): Promise<Response> {
+    if (!credential) throw new Error('worker is not registered');
     const response = await fetch(new URL(path, `${this.baseURL.replace(/\/$/, '')}/`), {
       method,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.secret}`,
+        Authorization: `Bearer ${credential}`,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-    if (response.status >= 400) throw new Error(`coordinator returned ${response.status} for ${method} ${path}`);
+    if (response.status >= 400) {
+      throw new CoordinatorError(`coordinator returned ${response.status} for ${method} ${path}`, response.status);
+    }
     return response;
   }
 
-  async register(hostname: string, cpuCores: number, memoryMB: number): Promise<Worker> {
+  async register(hostname: string, cpuCores: number, memoryMB: number,
+    options: { workerID?: string; labels?: Record<string, string> } = {}): Promise<Worker> {
     const response = await this.request('/workers/register', 'POST', {
       hostname, cpu_cores: cpuCores, memory_mb: memoryMB,
-    });
-    return response.json() as Promise<Worker>;
+      ...(options.workerID ? { worker_id: options.workerID } : {}),
+      ...(options.labels && Object.keys(options.labels).length ? { labels: options.labels } : {}),
+    }, 10_000, this.secret);
+    // Registration is the only call that uses the shared secret; it returns this worker's own token.
+    const { token, ...worker } = await response.json() as Worker & { token?: string };
+    if (!token) throw new Error('coordinator did not issue a worker token');
+    this.token = token;
+    return worker;
   }
 
-  async heartbeat(workerID: string, currentLoad: number): Promise<void> {
-    await this.request('/workers/heartbeat', 'POST', {
+  /** Returns the IDs of running jobs the coordinator wants this worker to cancel. */
+  async heartbeat(workerID: string, currentLoad: number): Promise<string[]> {
+    const response = await this.request('/workers/heartbeat', 'POST', {
       worker_id: workerID, current_load: currentLoad,
     });
+    const body = await response.json().catch(() => ({})) as { cancel_jobs?: unknown };
+    return Array.isArray(body.cancel_jobs)
+      ? body.cancel_jobs.filter((id): id is string => typeof id === 'string') : [];
   }
 
-  async pollJob(workerID: string): Promise<Job | null> {
-    const response = await this.request(`/jobs/next?worker_id=${encodeURIComponent(workerID)}`, 'GET');
+  /** Long polls: the coordinator holds the request up to `waitSeconds` for a job to be assigned. */
+  async pollJob(workerID: string, waitSeconds = 0): Promise<Job | null> {
+    const response = await this.request(
+      `/jobs/next?worker_id=${encodeURIComponent(workerID)}&wait=${waitSeconds}`, 'GET',
+      undefined, 10_000 + waitSeconds * 1000);
     if (response.status === 204) return null;
     return response.json() as Promise<Job>;
   }

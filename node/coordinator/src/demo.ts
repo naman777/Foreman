@@ -40,17 +40,28 @@ export function isDemoScenario(value: unknown): value is DemoScenario {
 
 export class DemoLimiter {
   private timestamps: number[] = [];
+  private readonly perIp = new Map<string, number[]>();
 
-  constructor(private readonly now: () => number) {}
+  constructor(private readonly now: () => number,
+    private readonly perIpPerHour = 8, private readonly globalPerHour = 24) {}
 
-  allow(): boolean {
+  /** Allows one submission per 3s overall, a global hourly cap, and a per-visitor hourly cap. */
+  allow(visitor = 'anonymous'): boolean {
     const current = this.now();
-    this.timestamps = this.timestamps.filter((time) => current - time < 60 * 60 * 1000);
+    const fresh = (time: number) => current - time < 60 * 60 * 1000;
+    this.timestamps = this.timestamps.filter(fresh);
+    for (const [key, times] of this.perIp) {
+      const kept = times.filter(fresh);
+      if (kept.length) this.perIp.set(key, kept); else this.perIp.delete(key);
+    }
     const last = this.timestamps.at(-1);
-    if (this.timestamps.length >= 24 || (last !== undefined && current - last < 3000)) {
+    const own = this.perIp.get(visitor) ?? [];
+    if (this.timestamps.length >= this.globalPerHour || own.length >= this.perIpPerHour ||
+        (last !== undefined && current - last < 3000)) {
       return false;
     }
     this.timestamps.push(current);
+    this.perIp.set(visitor, [...own, current]);
     return true;
   }
 }

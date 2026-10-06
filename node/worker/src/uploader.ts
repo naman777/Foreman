@@ -1,6 +1,6 @@
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { finished, pipeline } from 'node:stream/promises';
@@ -21,6 +21,17 @@ async function listFiles(root: string): Promise<string[]> {
 
 export class ArtifactUploader {
   constructor(private readonly client: S3Client, private readonly bucket: string) {}
+
+  /** Stores a job's combined stdout/stderr so it can be read through the coordinator. */
+  async uploadLogs(jobID: string, logsPath: string): Promise<string> {
+    const body = await readFile(logsPath);
+    const key = `logs/${jobID}.txt`;
+    await this.client.send(new PutObjectCommand({
+      Bucket: this.bucket, Key: key, Body: body,
+      ContentLength: body.length, ContentType: 'text/plain; charset=utf-8',
+    }));
+    return key;
+  }
 
   async uploadArtifacts(jobID: string, directory: string): Promise<string | null> {
     const files = await listFiles(directory);
