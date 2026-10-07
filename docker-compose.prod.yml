@@ -114,7 +114,8 @@ services:
     build:
       context: ./dashboard
       args:
-        NEXT_PUBLIC_API_URL: https://${FOREMAN_DOMAIN:?set FOREMAN_DOMAIN}/api
+        # Relative, so the dashboard works on every hostname Caddy serves.
+        NEXT_PUBLIC_API_URL: /api
     depends_on:
       coordinator:
         condition: service_healthy
@@ -136,6 +137,8 @@ services:
         condition: service_healthy
     environment:
       FOREMAN_DOMAIN: ${FOREMAN_DOMAIN:?set FOREMAN_DOMAIN}
+      # Space-separated extra hostnames that serve the same site.
+      FOREMAN_ALIAS_DOMAINS: ${FOREMAN_ALIAS_DOMAINS-foreman.namankundra.com}
     ports:
       - "80:80"
       - "443:443"

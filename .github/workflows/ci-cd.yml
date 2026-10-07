@@ -71,7 +71,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm build
         env:
-          NEXT_PUBLIC_API_URL: https://foreman.naman.sbs/api
+          NEXT_PUBLIC_API_URL: /api
 
   smoke:
     name: Compose smoke test

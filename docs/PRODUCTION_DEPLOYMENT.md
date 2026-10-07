@@ -13,6 +13,8 @@ python3 deploy/create_env.py --domain foreman.naman.sbs --output .env.production
 chmod 600 .env.production
 ```
 
+To serve the same site on more hostnames, point their DNS at the VM and list them space-separated in `FOREMAN_ALIAS_DOMAINS`. It defaults to `foreman.namankundra.com` in `docker-compose.prod.yml`; set it in `.env.production` to override, or leave it empty for no aliases. Caddy issues a certificate for each on the next deploy. The dashboard calls the API with a relative `/api` path, so it works on every hostname. Artifact download links always use `FOREMAN_DOMAIN`.
+
 The generator refuses to overwrite an existing file. Keep `.env.production` private and back it up through the VM's secret storage process. Never commit or print its credentials. The development `.env` is not used for production.
 
 ## Continuous deployment
