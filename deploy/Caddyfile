@@ -32,3 +32,13 @@
     }
 }
 
+# The Fathom API shares this VM and proxy; its container joins this Compose network.
+fathom-backend.naman.sbs {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        -Server
+    }
+    reverse_proxy fathom-api:8000
+}
