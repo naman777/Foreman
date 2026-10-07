@@ -229,13 +229,19 @@ it('every coordinator hears job changes through NOTIFY', async () => {
   const listener = new JobEventListener(url, (id) => jobs.getJob(id), (job) => seen.push([job.id, job.status]));
   await listener.start();
   try {
+    // The listener reloads the job on each notification, so wait for one status before causing the next.
+    const heard = async (status) => {
+      const deadline = Date.now() + 5000;
+      while (!seen.some(([, s]) => s === status) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.ok(seen.some(([, s]) => s === status), `no notification seen for ${status}`);
+    };
     const worker = await newWorker();
     const job = await jobs.createJob(spec());
+    await heard('queued');
     await scheduler.runBatch();
+    await heard('scheduled');
     await jobs.getNextJob(worker.id);
-    const deadline = Date.now() + 5000;
-    while (seen.length < 3 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.deepEqual([...new Set(seen.map(([, status]) => status))].sort(), ['queued', 'running', 'scheduled']);
+    await heard('running');
     assert.ok(seen.every(([id]) => id === job.id));
   } finally { await listener.stop(); }
 }, embedded && 'embedded Postgres cannot deliver NOTIFY across connections');
