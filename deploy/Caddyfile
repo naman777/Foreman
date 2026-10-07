@@ -42,3 +42,14 @@ fathom-backend.naman.sbs {
     }
     reverse_proxy fathom-api:8000
 }
+
+# The Nightshift demo shares this VM and proxy; its dashboard container joins this Compose network.
+nightshift.naman.sbs nightshift.namankundra.com {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        -Server
+    }
+    reverse_proxy nightshift-dashboard:3000
+}
