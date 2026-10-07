@@ -44,5 +44,7 @@ export const api = {
 };
 
 export function wsUrl(): string {
-  return BASE.replace(/^http/, "ws") + "/demo/ws";
+  // A relative base (production's "/api") resolves against the page's origin.
+  const base = BASE.startsWith("/") ? window.location.origin + BASE : BASE;
+  return base.replace(/^http/, "ws") + "/demo/ws";
 }

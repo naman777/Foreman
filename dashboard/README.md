@@ -11,4 +11,4 @@ pnpm lint
 pnpm build
 ```
 
-`NEXT_PUBLIC_API_URL` is baked in at build time. The Docker image takes it as a build argument; in production it is `https://<domain>/api`. See the [project README](../README.md) for the full stack.
+`NEXT_PUBLIC_API_URL` is baked in at build time. The Docker image takes it as a build argument; in production it is the relative path `/api`. See the [project README](../README.md) for the full stack.

@@ -1,4 +1,4 @@
-{$FOREMAN_DOMAIN} {
+{$FOREMAN_DOMAIN} {$FOREMAN_ALIAS_DOMAINS} {
     encode zstd gzip
 
     header {
