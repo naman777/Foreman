@@ -18,11 +18,13 @@ test('worker store uses schema columns and parameterized values', async () => {
     hostname: 'host', cpuCores: 2, memoryMB: 1024,
     labels: { region: 'west' }, tokenHash: 'hash',
   }), worker);
-  assert.deepEqual(calls[0].values, ['host', 2, 1024, '{"region":"west"}', 'hash']);
+  assert.deepEqual(calls[0].values, [null, 'host', 2, 1024, '{"region":"west"}', 'hash']);
   assert.match(calls[0].sql, /registered_token_hash/);
-  assert.match(calls[0].sql, /\$4::jsonb/);
+  assert.match(calls[0].sql, /\$5::jsonb/);
+  assert.match(calls[0].sql, /ON CONFLICT \(id\) DO UPDATE/);
   assert.equal(await store.updateHeartbeat('worker-1', 3), true);
   assert.deepEqual(calls[1].values, ['worker-1', 3]);
+  assert.match(calls[1].sql, /status IN \('unhealthy', 'offline'\) THEN 'online'/);
   assert.deepEqual(await store.listWorkers(), [worker]);
   assert.match(calls[2].sql, /ORDER BY registered_at DESC/);
 });

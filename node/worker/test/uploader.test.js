@@ -46,3 +46,18 @@ test('uploader packs nested files and uses the Go object key', async () => {
     assert.deepEqual(entries, [['nested/answer.txt', '42']]);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('uploader stores logs under logs/<job>.txt', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'foreman-upload-test-'));
+  const file = join(dir, 'logs.txt');
+  await writeFile(file, 'hello');
+  let input;
+  try {
+    const key = await new ArtifactUploader({ async send(value) { input = value.input; } }, 'bucket')
+      .uploadLogs('job-7', file);
+    assert.equal(key, 'logs/job-7.txt');
+    assert.equal(input.Key, key);
+    assert.equal(input.Body.toString(), 'hello');
+    assert.match(input.ContentType, /^text\/plain/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

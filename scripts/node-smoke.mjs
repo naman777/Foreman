@@ -32,6 +32,15 @@ async function waitForJob(id, token, expected) {
   throw new Error(`job ${id} did not finish within 45 seconds`);
 }
 
+async function waitForStatus(id, token, expected) {
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    const detail = await request(`/jobs/${id}`, { token });
+    if (detail.data.job.status === expected) return detail.data;
+    await sleep(500);
+  }
+  throw new Error(`job ${id} never reached ${expected}`);
+}
+
 async function main() {
   const health = await request('/health');
   assert.equal(health.status, 200);
@@ -41,14 +50,20 @@ async function main() {
   assert.equal(login.status, 200);
   const token = login.data.token;
   assert.ok(token);
-  const workers = await request('/workers', { token });
-  assert.equal(workers.status, 200);
-  assert.ok(workers.data.filter((worker) => worker.status === 'online').length >= minWorkers);
+  // Workers register a few seconds after the coordinator becomes healthy.
+  let online = 0;
+  for (let attempt = 0; attempt < 30 && online < minWorkers; attempt += 1) {
+    const workers = await request('/workers', { token });
+    assert.equal(workers.status, 200);
+    online = workers.data.filter((worker) => worker.status === 'online').length;
+    if (online < minWorkers) await sleep(1000);
+  }
+  assert.ok(online >= minWorkers, `expected ${minWorkers} online workers, found ${online}`);
   assert.equal((await request('/metrics/summary', { token })).status, 200);
   assert.equal((await request('/jobs', { token })).status, 200);
-  const loginPage = await fetch(`${dashboard}/login`);
-  assert.equal(loginPage.status, 200);
-  assert.match(await loginPage.text(), /Foreman/);
+  const page = await fetch(`${dashboard}/`);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /Foreman/);
   console.log('PASS health, authentication, workers, metrics, jobs, dashboard HTTP');
 
   const ws = new WebSocket(`${base.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(token)}`);
@@ -87,6 +102,29 @@ async function main() {
     const timedOut = await waitForJob(timeoutID, token, 'timed_out');
     assert.equal(timedOut.job.retries, 0);
     console.log(`PASS timed-out job ${timeoutID}`);
+
+    const logsID = await submit('logs', 'echo hello-from-logs; echo oops >&2');
+    await waitForJob(logsID, token, 'completed');
+    const logs = await fetch(`${base}/jobs/${logsID}/logs`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(logs.status, 200);
+    const logText = await logs.text();
+    assert.match(logText, /hello-from-logs/);
+    assert.match(logText, /oops/);
+    console.log(`PASS job logs ${logsID}`);
+
+    const retryID = (await request('/jobs', { token, method: 'POST', body: {
+      name: 'node-only-smoke-retry', image_name: 'alpine:3.20', command: 'exit 1',
+      required_cpu: 1, required_memory: 128, max_retries: 1, timeout_seconds: 30 } })).data.id;
+    const retried = await waitForJob(retryID, token, 'failed');
+    assert.equal(retried.job.retries, 1);
+    console.log(`PASS failed job retried once with backoff ${retryID}`);
+
+    const cancelID = await submit('cancel', 'sleep 120', 300);
+    await waitForStatus(cancelID, token, 'running');
+    assert.equal((await request(`/jobs/${cancelID}/cancel`, { token, method: 'POST' })).status, 202);
+    await waitForJob(cancelID, token, 'cancelled');
+    assert.equal((await request(`/jobs/${cancelID}/cancel`, { token, method: 'POST' })).status, 409);
+    console.log(`PASS running job cancelled ${cancelID}`);
 
     const concurrentIDs = await Promise.all(Array.from({ length: 6 }, (_, index) =>
       submit(`concurrent-${index}`, 'sleep 1; echo done')));

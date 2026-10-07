@@ -2,13 +2,17 @@ import type { Job, JobEvent, MetricsSummary, Worker } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function send(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(`${BASE}/demo${path}`, { cache: "no-store", ...init });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string } | null;
     throw new Error(body?.error ?? `Request failed (${response.status})`);
   }
-  return response.json() as Promise<T>;
+  return response;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await send(path, init)).json() as Promise<T>;
 }
 
 export type DemoScenario = "artifact" | "failure" | "timeout" | "retry" | "priority";
@@ -30,6 +34,8 @@ export const api = {
     request<{ object_key: string; download_url: string; expires_in: string }>(
       `/jobs/${id}/artifacts`
     ),
+  cancelJob: (id: string) => request<Job>(`/jobs/${id}/cancel`, { method: "POST" }),
+  jobLogs: async (id: string) => (await send(`/jobs/${id}/logs`)).text(),
   submitDemo: (scenario: DemoScenario) => request<Job>("/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

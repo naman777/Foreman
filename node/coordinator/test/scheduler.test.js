@@ -20,7 +20,7 @@ test('batch updates local capacity and respects Redis lock result', async () => 
   const jobs = [job('a'), job('b'), job('c')];
   const assigned = [];
   const store = {
-    async getQueuedJobs(limit) { assert.equal(limit, 10); return jobs; },
+    async getQueuedJobs(limit) { assert.equal(limit, 50); return jobs; },
     async getEligibleWorkersWithLoad() { return [worker('w', 2, 512)]; },
     async assignJob(j, w) { assigned.push([j, w]); return true; },
   };

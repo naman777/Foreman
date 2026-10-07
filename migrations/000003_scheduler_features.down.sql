@@ -1,0 +1,12 @@
+DROP TRIGGER IF EXISTS jobs_notify ON jobs;
+DROP FUNCTION IF EXISTS foreman_notify_job();
+DROP INDEX IF EXISTS idx_jobs_queue;
+DROP INDEX IF EXISTS idx_jobs_demo;
+DROP INDEX IF EXISTS idx_jobs_completed_at;
+CREATE INDEX IF NOT EXISTS idx_jobs_priority ON jobs(priority, submitted_at) WHERE status = 'queued';
+ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_worker_id_fkey;
+ALTER TABLE jobs ADD CONSTRAINT jobs_worker_id_fkey FOREIGN KEY (worker_id) REFERENCES workers(id);
+ALTER TABLE jobs DROP COLUMN IF EXISTS selector;
+ALTER TABLE jobs DROP COLUMN IF EXISTS cancel_requested;
+ALTER TABLE jobs DROP COLUMN IF EXISTS run_after;
+ALTER TABLE jobs DROP COLUMN IF EXISTS is_demo;

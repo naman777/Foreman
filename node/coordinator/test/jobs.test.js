@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { createCoordinatorServer } from '../dist/server.js';
 import { PostgresJobStore } from '../dist/store.js';
@@ -16,7 +17,9 @@ const jobs = {
   async updateJobStatus(input) { calls.push(['status', input]); return { ...job, status: input.status }; },
   async getMetricsSummary() { return { queued: 2, total: 2 }; },
 };
-const server = createCoordinatorServer({ secret: 'secret', jobs });
+const workers = { async verifyToken(workerID, hash) {
+  return workerID === id && hash === createHash('sha256').update('worker-token').digest('hex'); } };
+const server = createCoordinatorServer({ secret: 'secret', jobs, workers });
 let base;
 let token;
 before(async () => {
@@ -37,7 +40,7 @@ test('job submission requires login and uses Go defaults', async () => {
   assert.equal(response.status, 201);
   assert.deepEqual(await response.json(), job);
   assert.deepEqual(calls.at(-2), ['create', { name: null, imageName: 'alpine', command: 'echo hi',
-    requiredCPU: 1, requiredMemory: 256, maxRetries: 0, timeoutSeconds: 300, priority: 5 }]);
+    requiredCPU: 1, requiredMemory: 256, maxRetries: 0, timeoutSeconds: 300, priority: 5, selector: {} }]);
   assert.deepEqual(calls.at(-1), ['event', id, 'submitted', {}]);
 });
 
@@ -69,17 +72,23 @@ test('PostgreSQL job store parameterizes filters and uses existing schema', asyn
   assert.match(queries[2].sql, /LIMIT \$3 OFFSET \$4/);
 });
 
-test('worker claim and status routes use worker secret', async () => {
+test('worker claim and status routes use the worker token, not the shared secret', async () => {
   assert.equal((await fetch(`${base}/jobs/next?worker_id=${id}`)).status, 401);
+  assert.equal((await fetch(`${base}/jobs/next?worker_id=${id}`, {
+    headers: { Authorization: 'Bearer secret' } })).status, 401, 'the bootstrap secret no longer works here');
   const next = await fetch(`${base}/jobs/next?worker_id=${id}`, {
-    headers: { Authorization: 'Bearer secret' },
+    headers: { Authorization: 'Bearer worker-token' },
   });
   assert.equal(next.status, 200);
   assert.deepEqual(await next.json(), job);
   assert.deepEqual(calls.at(-1), ['next', id]);
   const update = await fetch(`${base}/jobs/${id}/status`, { method: 'POST',
-    headers: { Authorization: 'Bearer secret', 'Content-Type': 'application/json' },
+    headers: { Authorization: 'Bearer worker-token', 'Content-Type': 'application/json' },
     body: JSON.stringify({ status: 'running', worker_id: id }) });
+  assert.equal((await fetch(`${base}/jobs/${id}/status`, { method: 'POST',
+    headers: { Authorization: 'Bearer worker-token', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'running', worker_id: '123e4567-e89b-42d3-a456-426614174001' }) })).status,
+  401, 'a worker cannot report as another worker');
   assert.equal(update.status, 200);
   assert.deepEqual(calls.at(-2), ['status', {
     jobID: id, status: 'running', workerID: id, logsPath: null, artifactPath: null,
@@ -110,8 +119,9 @@ test('claim and final status use one database client per transaction', async () 
     logsPath: 'logs/key', artifactPath: 'artifacts/key' });
   assert.deepEqual(statements[5].values, [id, 'completed', 'logs/key', 'artifacts/key', id]);
   assert.match(statements[5].sql, /status = 'running' AND worker_id = \$5/);
-  assert.match(statements[5].sql, /status = CASE WHEN \$2 = 'failed' AND retries < max_retries THEN 'queued'/);
-  assert.match(statements[5].sql, /retries = CASE WHEN \$2 = 'failed' AND retries < max_retries THEN retries \+ 1/);
+  assert.match(statements[5].sql, /status = CASE WHEN \$2 IN \('failed', 'timed_out'\) AND retries < max_retries THEN 'queued'/);
+  assert.match(statements[5].sql, /retries = CASE WHEN \$2 IN \('failed', 'timed_out'\) AND retries < max_retries THEN retries \+ 1/);
+  assert.match(statements[5].sql, /run_after = CASE WHEN .* THEN NOW\(\) \+ \(LEAST\(300, 5 \* POWER\(2, retries\)\)/);
   assert.match(statements[6].sql, /current_load = GREATEST/);
   assert.equal(statements[7].sql, 'COMMIT');
   assert.equal(released, 2);

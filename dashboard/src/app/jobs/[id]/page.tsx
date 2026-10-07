@@ -39,12 +39,33 @@ export default function JobDetailPage() {
   const qc = useQueryClient();
   const [artifactUrl, setArtifactUrl] = useState<string | null>(null);
   const [artifactLoading, setArtifactLoading] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const { data, isLoading } = useQuery<{ job: Job; events: JobEvent[] }>({
     queryKey: ["job", id],
     queryFn: () => api.job(id),
     refetchInterval: 5_000,
   });
+
+  const logsKey = data?.job.logs_path ?? null;
+  const logs = useQuery<string>({
+    queryKey: ["job-logs", id, logsKey],
+    queryFn: () => api.jobLogs(id),
+    enabled: logsKey !== null,
+    retry: false,
+  });
+
+  async function cancel() {
+    setCancelling(true);
+    try {
+      await api.cancelJob(id);
+      await qc.invalidateQueries({ queryKey: ["job", id] });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Could not cancel the job.");
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   useWebSocket((e: WSEvent) => {
     if (e.type === "job_updated") {
@@ -116,6 +137,16 @@ export default function JobDetailPage() {
             {job.name ?? "Unnamed job"}
           </h1>
           <JobStatusBadge status={job.status as JobStatus} />
+          {["queued", "scheduled", "running"].includes(job.status) && (
+            <button
+              onClick={cancel}
+              disabled={cancelling || job.cancel_requested}
+              className="ml-auto rounded-lg px-3 py-1.5 text-xs font-medium transition-opacity disabled:opacity-50"
+              style={{ border: "1px solid rgba(239,68,68,0.4)", color: "#fca5a5", background: "rgba(239,68,68,0.08)" }}
+            >
+              {job.cancel_requested ? "Cancelling…" : cancelling ? "Cancelling…" : "Cancel job"}
+            </button>
+          )}
         </div>
         <p className="mt-1 font-mono text-xs" style={{ color: "var(--text-muted)" }}>{job.id}</p>
       </div>
@@ -253,18 +284,17 @@ export default function JobDetailPage() {
       {/* Logs */}
       {job.logs_path && (
         <div className="glass-card-static p-6 animate-fade-in-up" style={{ animationDelay: "0.25s" }}>
-          <h2 className="text-sm font-semibold mb-2" style={{ color: "var(--text-primary)" }}>Log Path</h2>
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg"
-            style={{ background: "rgba(255,255,255,0.02)", border: "1px solid var(--border-subtle)" }}
+          <h2 className="text-sm font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Logs</h2>
+          <pre
+            className="max-h-96 overflow-auto rounded-lg px-3 py-2 font-mono text-xs whitespace-pre-wrap break-all"
+            style={{
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid var(--border-subtle)",
+              color: "var(--text-secondary)",
+            }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-muted)", flexShrink: 0 }}>
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="16" y1="13" x2="8" y2="13" />
-              <line x1="16" y1="17" x2="8" y2="17" />
-            </svg>
-            <p className="font-mono text-xs break-all" style={{ color: "var(--text-secondary)" }}>{job.logs_path}</p>
-          </div>
+            {logs.isLoading ? "Loading logs…" : logs.isError ? "Logs are not available." : logs.data}
+          </pre>
         </div>
       )}
     </div>
