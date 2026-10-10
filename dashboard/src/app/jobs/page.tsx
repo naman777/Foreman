@@ -6,25 +6,31 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import type { Job, JobStatus, WSEvent } from "@/lib/types";
 import { JobStatusBadge } from "@/components/StatusBadge";
+import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/segmented";
+import { Spinner } from "@/components/ui/spinner";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { ago, duration } from "@/lib/utils";
+import { ago, cn, duration } from "@/lib/utils";
 
-const STATUSES: Array<{ value: string; label: string }> = [
-  { value: "", label: "All" },
+const STATUSES = [
+  { value: "all", label: "All" },
   { value: "queued", label: "Queued" },
   { value: "running", label: "Running" },
   { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
   { value: "timed_out", label: "Timed out" },
-];
+] as const;
+
+type Filter = (typeof STATUSES)[number]["value"];
 
 export default function JobsPage() {
   const qc = useQueryClient();
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState<Filter>("all");
 
   const { data: jobs = [], isLoading } = useQuery<Job[]>({
     queryKey: ["jobs", status],
-    queryFn: () => api.jobs({ status: status || undefined, limit: 100 }),
+    queryFn: () => api.jobs({ status: status === "all" ? undefined : status, limit: 100 }),
     refetchInterval: 10_000,
   });
 
@@ -37,134 +43,95 @@ export default function JobsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-end justify-between animate-fade-in">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>
-            Jobs
-          </h1>
-          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-            Browse and monitor all scheduled jobs
-          </p>
-        </div>
+      <header className="space-y-3">
+        <h1 className="text-2xl font-medium sm:text-center sm:text-3xl">Jobs</h1>
+        <p className="mx-auto max-w-3xl text-base text-neutral-700 sm:text-center sm:text-lg md:text-xl dark:text-neutral-400">
+          Browse every job the scheduler has seen, with <span className="highlight">live status updates</span>.
+        </p>
+      </header>
+
+      {/* Toolbar */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-xs px-2.5 py-1 rounded-full" style={{ background: "rgba(99, 102, 241, 0.1)", color: "var(--accent-primary)" }}>{jobs.length} shown</span>
-          <Link href="/playground" className="btn-gradient text-sm">Run a demo →</Link>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {isLoading ? "Loading jobs" : <>Showing <span className="font-semibold text-gray-900 dark:text-gray-100">{jobs.length}</span> jobs</>}
+          </p>
+          <span className="hidden h-4 w-px bg-gray-300 sm:block dark:bg-gray-700" />
+          <span className="hidden text-sm text-gray-500 sm:inline dark:text-gray-400">Newest first</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Segmented options={STATUSES} value={status} onChange={setStatus} label="Filter by status" />
+          <Button asChild variant="solid">
+            <Link href="/playground">Run a demo</Link>
+          </Button>
         </div>
       </div>
 
-      {/* Status filter tabs */}
-      <div className="flex gap-1 p-1 rounded-xl w-fit animate-fade-in-up"
-        style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }}
-      >
-        {STATUSES.map((s) => (
-          <button
-            key={s.value}
-            onClick={() => setStatus(s.value)}
-            className="rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 cursor-pointer"
-            style={{
-              background: status === s.value
-                ? "var(--accent-gradient)"
-                : "transparent",
-              color: status === s.value
-                ? "#ffffff"
-                : "var(--text-muted)",
-              boxShadow: status === s.value
-                ? "0 2px 12px rgba(99, 102, 241, 0.3)"
-                : "none",
-            }}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Jobs Table */}
-      <div className="glass-table animate-fade-in-up" style={{ animationDelay: "0.1s" }}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr>
-              {["Name / ID", "Status", "Image", "Priority", "Duration", "Submitted"].map((h) => (
-                <th key={h} className="text-left">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && (
-              <tr>
-                <td colSpan={6} className="!py-12 text-center">
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="w-6 h-6 rounded-full border-2 border-t-transparent animate-spin"
-                      style={{ borderColor: "var(--accent-primary)", borderTopColor: "transparent" }}
-                    />
-                    <span style={{ color: "var(--text-muted)" }}>Loading jobs…</span>
-                  </div>
-                </td>
-              </tr>
-            )}
-            {!isLoading && jobs.length === 0 && (
-              <tr>
-                <td colSpan={6} className="!py-12 text-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
-                      style={{ background: "rgba(99, 102, 241, 0.1)" }}
-                    >
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="1.5">
-                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" strokeLinecap="round" strokeLinejoin="round" />
-                        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-                      </svg>
-                    </div>
-                    <p className="text-sm" style={{ color: "var(--text-muted)" }}>No jobs found</p>
-                  </div>
-                </td>
-              </tr>
-            )}
-            {jobs.map((j, i) => (
-              <tr key={j.id} className="animate-fade-in-up" style={{ animationDelay: `${Math.min(i * 0.03, 0.3)}s` }}>
-                <td>
-                  <Link href={`/jobs/${j.id}`} className="group">
-                    <p className="font-medium transition-colors duration-200"
-                      style={{ color: "var(--text-primary)" }}
-                    >
-                      <span className="group-hover:text-[var(--accent-primary)]">{j.name ?? "Unnamed"}</span>
-                    </p>
-                    <p className="font-mono text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                      {j.id.slice(0, 8)}…
-                    </p>
-                  </Link>
-                </td>
-                <td>
-                  <JobStatusBadge status={j.status as JobStatus} />
-                </td>
-                <td className="font-mono text-xs max-w-[160px] truncate" style={{ color: "var(--text-muted)" }}>
-                  {j.image_name}
-                </td>
-                <td>
-                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-semibold"
-                    style={{
-                      background: j.priority >= 8
-                        ? "rgba(239, 68, 68, 0.1)"
-                        : j.priority >= 5
-                          ? "rgba(245, 158, 11, 0.1)"
-                          : "rgba(100, 116, 139, 0.1)",
-                      color: j.priority >= 8
-                        ? "#fca5a5"
-                        : j.priority >= 5
-                          ? "#fbbf24"
-                          : "var(--text-muted)",
-                    }}
-                  >
-                    {j.priority}
-                  </span>
-                </td>
-                <td className="tabular-nums" style={{ color: "var(--text-secondary)" }}>
-                  {duration(j.started_at, j.completed_at ?? (j.status === "running" ? null : j.scheduled_at))}
-                </td>
-                <td className="text-xs" style={{ color: "var(--text-muted)" }}>{ago(j.submitted_at)}</td>
-              </tr>
+      {/* Jobs table */}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {["Name / ID", "Status", "Image", "Priority", "Duration", "Submitted"].map((h) => (
+              <TableHead key={h}>{h}</TableHead>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading && (
+            <TableRow>
+              <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                <span className="inline-flex items-center gap-2">
+                  <Spinner label="Loading jobs" />
+                  Loading jobs
+                </span>
+              </TableCell>
+            </TableRow>
+          )}
+          {!isLoading && jobs.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                No jobs found
+              </TableCell>
+            </TableRow>
+          )}
+          {jobs.map((j) => (
+            <TableRow key={j.id}>
+              <TableCell>
+                <Link href={`/jobs/${j.id}`} className="group block outline-none">
+                  <span className="block font-medium transition-colors duration-200 group-hover:text-brand group-focus-visible:text-brand">
+                    {j.name ?? "Unnamed"}
+                  </span>
+                  <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
+                    {j.id.slice(0, 8)}
+                  </span>
+                </Link>
+              </TableCell>
+              <TableCell>
+                <JobStatusBadge status={j.status as JobStatus} />
+              </TableCell>
+              <TableCell className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">
+                {j.image_name}
+              </TableCell>
+              <TableCell
+                className={cn(
+                  "font-semibold tabular-nums",
+                  j.priority >= 8
+                    ? "text-red-700 dark:text-red-400"
+                    : j.priority >= 5
+                      ? "text-yellow-800 dark:text-yellow-200"
+                      : "text-muted-foreground",
+                )}
+              >
+                {j.priority}
+              </TableCell>
+              <TableCell className="whitespace-nowrap tabular-nums">
+                {duration(j.started_at, j.completed_at ?? (j.status === "running" ? null : j.scheduled_at))}
+              </TableCell>
+              <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{ago(j.submitted_at)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }
