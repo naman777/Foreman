@@ -1,30 +1,31 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
-import { Sidebar } from "@/components/Sidebar";
-
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+import { Backdrop } from "@/components/backdrop";
+import { SiteFooter, SiteNav } from "@/components/SiteNav";
+import { ThemeScript } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
-  title: "Foreman — Job Scheduler",
+  title: "Foreman: job scheduler",
   description: "Distributed job scheduler dashboard",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`}>
-      <body className="min-h-full antialiased">
+    <html lang="en" className="dark h-full" suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
+      <body className="min-h-full">
         <Providers>
-            <div className="flex min-h-screen">
-              <Sidebar />
-              <main className="flex-1 pt-16 md:pt-0 md:ml-[260px] relative z-[1] min-w-0">
-                <div className="max-w-[1400px] mx-auto px-6 py-8 lg:px-10">
-                  {children}
-                </div>
-              </main>
-            </div>
+          <div className="flex min-h-screen flex-col">
+            <Backdrop />
+            <SiteNav />
+            <main className="mx-auto w-full max-w-6xl flex-1 p-6 sm:p-12">
+              {children}
+            </main>
+            <SiteFooter />
+          </div>
         </Providers>
       </body>
     </html>
